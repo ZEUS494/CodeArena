@@ -21,6 +21,7 @@ import {
   type Participant,
   type PublicTask,
   type RoomState,
+  type RoomSummary,
   type TrackId,
 } from '../shared/types.ts';
 import type {
@@ -47,6 +48,7 @@ interface StudentViewProps {
   lastAnswer: AnswerFeedback | null;
   errorMessage: string | null;
   activeClimbs: Record<string, ActiveClimbAnimation>;
+  onCheckRoom: (code: string) => Promise<RoomSummary | null>;
   onJoin: (payload: {
     firstName: string;
     lastName: string;
@@ -70,6 +72,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
   lastAnswer,
   errorMessage,
   activeClimbs,
+  onCheckRoom,
   onJoin,
   onLeave,
   onSubmitAnswer,
@@ -78,7 +81,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
   onClearError,
   onClearLastAnswer,
 }) => {
-  const [roomCode, setRoomCode] = useState(roomId);
+  const [roomCode, setRoomCode] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.hash.toLowerCase() === '#join') {
+      return '';
+    }
+    return roomId === 'main' ? '' : roomId;
+  });
+  const [roomVerified, setRoomVerified] = useState(false);
+  const [checkingRoom, setCheckingRoom] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [track, setTrack] = useState<TrackId>('python');
@@ -86,9 +96,32 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [answerInput, setAnswerInput] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  const allowedTracks = useMemo<TrackId[]>(() => {
+    const list = roomState.allowedTracks;
+    return list && list.length > 0 ? list : ['cpp', 'csharp', 'python'];
+  }, [roomState.allowedTracks]);
+
   useEffect(() => {
-    setRoomCode(roomId);
-  }, [roomId]);
+    if (!allowedTracks.includes(track)) {
+      setTrack(allowedTracks[0]);
+    }
+  }, [allowedTracks, track]);
+
+  const handleRoomCheckSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = roomCode.trim();
+    if (!trimmed) return;
+    setCheckingRoom(true);
+    const summary = await onCheckRoom(trimmed);
+    setCheckingRoom(false);
+    if (summary) {
+      setRoomCode(summary.id);
+      setRoomVerified(true);
+      if (summary.allowedTracks.length > 0 && !summary.allowedTracks.includes(track)) {
+        setTrack(summary.allowedTracks[0]);
+      }
+    }
+  };
 
   const solvedSet = useMemo(
     () => new Set(myParticipant?.solvedTaskIds ?? []),
@@ -207,7 +240,42 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </div>
           )}
 
-          {isFull ? (
+          {!roomVerified ? (
+            <form onSubmit={handleRoomCheckSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="student-room-code"
+                  className="block text-xs font-semibold text-slate-300"
+                >
+                  Введите код комнаты (от преподавателя)
+                </label>
+                <input
+                  id="student-room-code"
+                  type="text"
+                  required
+                  autoFocus
+                  maxLength={12}
+                  placeholder="Например: K7M2P"
+                  value={roomCode}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setRoomCode(val.toLowerCase() === 'main' ? 'main' : val.toUpperCase());
+                    if (errorMessage) onClearError();
+                  }}
+                  className="w-full px-3.5 py-3 text-base font-mono tracking-widest bg-[#0B1120] border border-slate-700 rounded-lg text-sky-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={!roomCode.trim() || checkingRoom}
+                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] disabled:bg-slate-800 disabled:text-slate-500 transition-colors cursor-pointer"
+              >
+                {checkingRoom ? 'Проверка комнаты...' : 'Подключиться к комнате'}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          ) : isFull ? (
             <div className="p-4 bg-amber-500/15 border border-amber-500/30 rounded-lg text-sm text-amber-200 space-y-1">
               <p className="font-semibold text-amber-300">
                 Все {MAX_PARTICIPANTS} мест сейчас заняты
@@ -218,26 +286,28 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </div>
           ) : (
             <form onSubmit={handleJoinSubmit} className="space-y-5">
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="student-room-code"
-                  className="block text-xs font-semibold text-slate-300"
-                >
-                  Код комнаты (от преподавателя)
-                </label>
-                <input
-                  id="student-room-code"
-                  type="text"
-                  maxLength={12}
-                  placeholder="Например: K7M2P или main"
-                  value={roomCode}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setRoomCode(val.toLowerCase() === 'main' ? 'main' : val.toUpperCase());
+              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 bg-sky-500/10 border border-sky-500/30 rounded-lg">
+                <div className="text-xs text-slate-200 space-y-0.5">
+                  <div>
+                    Комната: <strong className="font-mono text-sky-300">{roomCode}</strong>
+                    {roomState.teacherName && (
+                      <span className="text-slate-400"> · {roomState.teacherName}</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Предметы: {allowedTracks.map((id) => TRACK_LIST.find((t) => t.id === id)?.label ?? id).join(', ')}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoomVerified(false);
                     if (errorMessage) onClearError();
                   }}
-                  className="w-full px-3.5 py-2.5 text-sm font-mono tracking-wider bg-[#0B1120] border border-slate-700 rounded-lg text-sky-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500"
-                />
+                  className="text-xs font-semibold text-sky-300 hover:text-white underline cursor-pointer whitespace-nowrap"
+                >
+                  Сменить
+                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -288,11 +358,16 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
               {/* Direction Selector */}
               <div className="space-y-2">
-                <span className="block text-xs font-semibold text-slate-300">
-                  Направление
-                </span>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {TRACK_LIST.map((item) => {
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-semibold text-slate-300">
+                    Направление
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Преподаватель может изменить его после входа
+                  </span>
+                </div>
+                <div className={`grid gap-2.5 ${allowedTracks.length === 1 ? 'grid-cols-1' : allowedTracks.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                  {TRACK_LIST.filter((item) => allowedTracks.includes(item.id)).map((item) => {
                     const selected = track === item.id;
                     const accentColor = TRACK_DARK_ACCENT[item.id];
                     return (

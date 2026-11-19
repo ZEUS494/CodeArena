@@ -53,7 +53,10 @@ export default function App() {
     refreshRooms,
     createRoom,
     switchRoom,
+    checkRoomCode,
     updateTeacherName,
+    assignParticipantTrack,
+    assignParticipantGroup,
     extendTimer,
     joinAsStudent,
     leaveAsStudent,
@@ -282,6 +285,8 @@ export default function App() {
                 onCreateRoom={createRoom}
                 onSwitchRoom={switchRoom}
                 onUpdateTeacherName={updateTeacherName}
+                onAssignTrack={assignParticipantTrack}
+                onAssignGroup={assignParticipantGroup}
                 onExtendTimer={extendTimer}
                 onClearError={clearError}
                 onStart={startCompetition}
@@ -305,6 +310,7 @@ export default function App() {
                 lastAnswer={lastAnswer}
                 errorMessage={errorMessage}
                 activeClimbs={activeClimbs}
+                onCheckRoom={checkRoomCode}
                 onJoin={joinAsStudent}
                 onLeave={leaveAsStudent}
                 onSubmitAnswer={submitAnswer}

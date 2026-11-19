@@ -25,6 +25,7 @@ import {
   type GroupId,
   type RoomState,
   type RoomSummary,
+  type TrackId,
 } from '../shared/types.ts';
 import type { ActiveClimbAnimation } from '../hooks/useCompetitionSocket.ts';
 import { ClimbingArena } from './ClimbingArena.tsx';
@@ -58,9 +59,15 @@ interface TeacherDashboardProps {
   activeClimbs: Record<string, ActiveClimbAnimation>;
   errorMessage: string | null;
   onRefreshRooms: () => Promise<void>;
-  onCreateRoom: (customCode?: string, customTeacherName?: string) => Promise<string | null>;
+  onCreateRoom: (
+    customCode?: string,
+    customTeacherName?: string,
+    allowedTracks?: TrackId[]
+  ) => Promise<string | null>;
   onSwitchRoom: (targetCode: string) => Promise<boolean>;
   onUpdateTeacherName: (name: string) => Promise<void>;
+  onAssignTrack: (participantId: string, track: TrackId) => Promise<void>;
+  onAssignGroup: (participantId: string, group: GroupId) => Promise<void>;
   onExtendTimer: (addMinutes: number) => Promise<void>;
   onClearError: () => void;
   onStart: (durationMinutes?: number | null) => void;
@@ -91,6 +98,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onCreateRoom,
   onSwitchRoom,
   onUpdateTeacherName,
+  onAssignTrack,
+  onAssignGroup,
   onExtendTimer,
   onClearError,
   onStart,
@@ -114,7 +123,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [teacherInput, setTeacherInput] = useState(teacherName || roomState.teacherName || '');
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [joinRoomInput, setJoinRoomInput] = useState('');
+  const [selectedRoomTracks, setSelectedRoomTracks] = useState<TrackId[]>(['cpp', 'csharp', 'python']);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+
+  const toggleRoomTrack = (id: TrackId) => {
+    setSelectedRoomTracks((prev) => {
+      if (prev.includes(id)) {
+        return prev.length > 1 ? prev.filter((t) => t !== id) : prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const roomAllowedTracks = useMemo<TrackId[]>(() => {
+    const list = roomState.allowedTracks;
+    return list && list.length > 0 ? list : ['cpp', 'csharp', 'python'];
+  }, [roomState.allowedTracks]);
 
   useEffect(() => {
     void onRefreshRooms();
@@ -133,8 +157,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const studentJoinUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}${window.location.pathname}#${roomId || 'main'}`;
-  }, [roomId]);
+    return `${window.location.origin}${window.location.pathname}#join`;
+  }, []);
 
   const handleCopyCode = async () => {
     try {
@@ -248,13 +272,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 Преподаватель: <strong className="text-white">{roomState.teacherName || teacherName}</strong>
               </span>
             )}
+            <span className="text-xs text-slate-400">
+              Предметы:{' '}
+              <strong className="text-slate-200">
+                {roomAllowedTracks.map((id) => TRACK_LIST.find((t) => t.id === id)?.label ?? id).join(', ')}
+              </strong>
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={async () => {
-                await onCreateRoom(undefined, teacherInput);
+                await onCreateRoom(undefined, teacherInput, selectedRoomTracks);
                 setRoomPanelOpen(false);
               }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors cursor-pointer"
@@ -320,7 +350,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const code = await onCreateRoom(customRoomInput || undefined, teacherInput);
+                const code = await onCreateRoom(
+                  customRoomInput || undefined,
+                  teacherInput,
+                  selectedRoomTracks
+                );
                 if (code) {
                   setCustomRoomInput('');
                   setRoomPanelOpen(false);
@@ -329,8 +363,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               className="space-y-2"
             >
               <label className="block text-xs font-semibold text-slate-300">
-                Создать комнату со своим кодом
+                Создать комнату (предметы и код)
               </label>
+              <div className="flex flex-wrap gap-1.5 pb-1">
+                {TRACK_LIST.map((t) => {
+                  const checked = selectedRoomTracks.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleRoomTrack(t.id)}
+                      className={`px-2.5 py-1 text-xs font-mono font-semibold rounded-md border transition-colors cursor-pointer ${
+                        checked
+                          ? 'bg-[#2563EB]/25 border-sky-400 text-white'
+                          : 'bg-[#0B1120] border-slate-800 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      {checked ? '✓ ' : ''}
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -792,10 +846,41 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           className="py-3 px-3 font-mono text-xs font-semibold"
                           style={{ color: trackColor }}
                         >
-                          {track?.label}
+                          {roomState.status === 'lobby' ? (
+                            <select
+                              aria-label={`Направление для ${p.firstName} ${p.lastName}`}
+                              value={p.track}
+                              onChange={(e) => void onAssignTrack(p.id, e.target.value as TrackId)}
+                              className="px-2 py-1 text-xs font-mono font-semibold bg-[#0B1120] border border-slate-700 rounded-md focus:outline-none focus:border-sky-500 cursor-pointer"
+                              style={{ color: trackColor }}
+                            >
+                              {TRACK_LIST.filter((t) => roomAllowedTracks.includes(t.id)).map((t) => (
+                                <option key={t.id} value={t.id} className="bg-[#0B1120] text-white">
+                                  {t.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            track?.label
+                          )}
                         </td>
                         <td className="py-3 px-3 text-slate-400 text-xs whitespace-nowrap">
-                          {p.group}
+                          {roomState.status === 'lobby' ? (
+                            <select
+                              aria-label={`Группа для ${p.firstName} ${p.lastName}`}
+                              value={p.group}
+                              onChange={(e) => void onAssignGroup(p.id, e.target.value as GroupId)}
+                              className="px-2 py-1 text-xs bg-[#0B1120] border border-slate-700 rounded-md text-slate-200 focus:outline-none focus:border-sky-500 cursor-pointer"
+                            >
+                              {GROUP_LIST.map((g) => (
+                                <option key={g} value={g} className="bg-[#0B1120] text-white">
+                                  {g}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            p.group
+                          )}
                         </td>
                         <td className="py-3 px-3 font-mono text-xs font-semibold text-slate-100 tabular-nums whitespace-nowrap">
                           <div className="flex items-center gap-2.5">

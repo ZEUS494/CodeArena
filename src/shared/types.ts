@@ -226,6 +226,7 @@ export interface ClimbEvent {
 export interface RoomSummary {
   id: string;
   teacherName: string;
+  allowedTracks: TrackId[];
   status: CompetitionStatus;
   participantCount: number;
   updatedAt?: string;
@@ -253,6 +254,7 @@ export function generateRoomCode(length = 5): string {
 export interface RoomState {
   roomId?: string;
   teacherName?: string;
+  allowedTracks?: TrackId[];
   status: CompetitionStatus;
   maxParticipants: number;
   maxLevel: number;
