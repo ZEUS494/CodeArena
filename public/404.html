@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Высота Кода — переход в комнату</title>
+    <script>
+      (function () {
+        var path = window.location.pathname.replace(/\/+$/, '');
+        var parts = path.split('/').filter(Boolean);
+        var last = parts[parts.length - 1] || '';
+        // If hosted at /CodeArena/<ROOM_CODE>, redirect to /CodeArena/#<ROOM_CODE>
+        if (last && last.toLowerCase() !== 'codearena' && /^[A-Za-z0-9_-]{2,12}$/.test(last)) {
+          var base = '/' + parts.slice(0, -1).join('/') + (parts.length > 1 ? '/' : '');
+          window.location.replace(window.location.origin + base + '#' + last);
+          return;
+        }
+        window.location.replace(window.location.origin + '/CodeArena/');
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

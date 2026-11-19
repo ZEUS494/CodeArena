@@ -18,6 +18,9 @@ function getInitialTab(): ActiveTab {
   if (role === 'student') return 'student';
   if (role === 'results') return 'results';
   if (role === 'tasks') return 'tasks';
+  if (/^#[A-Za-z0-9_-]{2,12}$/.test(window.location.hash)) {
+    return 'student';
+  }
   return 'teacher';
 }
 

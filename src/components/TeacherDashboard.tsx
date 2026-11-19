@@ -133,8 +133,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const studentJoinUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    const roomQuery = roomId && roomId !== 'main' ? `&room=${encodeURIComponent(roomId)}` : '';
-    return `${window.location.origin}${window.location.pathname}?role=student${roomQuery}`;
+    return `${window.location.origin}${window.location.pathname}#${roomId || 'main'}`;
   }, [roomId]);
 
   const handleCopyCode = async () => {

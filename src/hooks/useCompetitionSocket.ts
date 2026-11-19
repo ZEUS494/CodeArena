@@ -34,6 +34,10 @@ const STORAGE_KEY_TEACHER_NAME = 'codeclimb_teacher_name';
 
 function getInitialRoomId(): string {
   if (typeof window === 'undefined') return 'main';
+  const hash = window.location.hash;
+  if (/^#[A-Za-z0-9_-]{2,12}$/.test(hash)) {
+    return normalizeRoomCode(hash.slice(1));
+  }
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get('room');
   if (fromUrl && fromUrl.trim()) {
