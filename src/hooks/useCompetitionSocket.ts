@@ -224,6 +224,8 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const reconnectTimerRef = useRef<number | null>(null);
   const demoAutoTimerRef = useRef<number | null>(null);
   const seenClimbIdsRef = useRef<Set<string>>(new Set());
+  const prevLevelsRef = useRef<Map<string, number>>(new Map());
+  const activeClimbsRef = useRef<Record<string, ActiveClimbAnimation>>({});
   const roleRef = useRef(role);
   const soundRef = useRef(soundEnabled);
   const myIdRef = useRef(myParticipantId);
@@ -235,6 +237,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   myIdRef.current = myParticipantId;
   roomStateRef.current = roomState;
   roomIdRef.current = roomId;
+  activeClimbsRef.current = activeClimbs;
 
   const sendMessage = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -244,14 +247,30 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   }, []);
 
   const triggerClimbAnimation = useCallback((event: ClimbEvent) => {
+    const existing = activeClimbsRef.current[event.participantId];
+    if (
+      existing &&
+      existing.toLevel === event.toLevel &&
+      Date.now() - existing.startedAt < 1300
+    ) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    const nextAnim: ActiveClimbAnimation = {
+      eventId: event.id,
+      fromLevel: event.fromLevel,
+      toLevel: event.toLevel,
+      startedAt,
+    };
+    activeClimbsRef.current = {
+      ...activeClimbsRef.current,
+      [event.participantId]: nextAnim,
+    };
+
     setActiveClimbs((prev) => ({
       ...prev,
-      [event.participantId]: {
-        eventId: event.id,
-        fromLevel: event.fromLevel,
-        toLevel: event.toLevel,
-        startedAt: Date.now(),
-      },
+      [event.participantId]: nextAnim,
     }));
 
     window.setTimeout(() => {
@@ -323,6 +342,37 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       }
     }
 
+    // Trigger smooth climb animation synchronously before level updates so character never teleports
+    const prevLevels = prevLevelsRef.current;
+    if (prevLevels.size > 0) {
+      for (const p of participants) {
+        const prevLvl = prevLevels.get(p.id);
+        if (prevLvl !== undefined && p.level > prevLvl) {
+          triggerClimbAnimation({
+            id: `sync-${p.id}-${p.level}`,
+            participantId: p.id,
+            participantName: `${p.firstName} ${p.lastName}`,
+            track: p.track,
+            group: p.group,
+            fromLevel: prevLvl,
+            toLevel: p.level,
+            timestamp: Date.now(),
+            finished: p.level >= MAX_LEVEL,
+          });
+          if (p.level >= MAX_LEVEL) {
+            playVictorySound(soundRef.current);
+          } else {
+            playHookClimbSound(p.level, soundRef.current);
+          }
+        }
+      }
+    }
+    const nextLevels = new Map<string, number>();
+    for (const p of participants) {
+      nextLevels.set(p.id, p.level);
+    }
+    prevLevelsRef.current = nextLevels;
+
     const gCount = Math.min(3, Math.max(1, Number(room.group_count ?? 1)));
     setRoomState((prev) => ({
       roomId: room?.id ?? targetRoomId,
@@ -360,12 +410,13 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         setTasks(getPublicTasks(me.track));
       }
     }
-  }, []);
+  }, [triggerClimbAnimation]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     const sb = supabase;
     const activeRoom = roomId;
+    prevLevelsRef.current.clear();
     if (!activeRoom) {
       setConnected(true);
       setRoomState(INITIAL_ROOM_STATE);

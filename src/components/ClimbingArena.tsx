@@ -1188,7 +1188,6 @@ export const ClimbingArena: React.FC<ClimbingArenaProps> = ({
   const chutesTotalW = laneCount * LANE_STRIDE;
   const viewWidth = LEFT_AXIS_W + chutesTotalW + RAIL_W + RIGHT_PAD;
   const slots = Array.from({ length: laneCount }, (_, idx) => participants[idx] ?? null);
-  const minWidthPx = Math.max(compact ? 700 : 880, laneCount * (compact ? 92 : 112));
 
   return (
     <div className="w-full overflow-hidden bg-[#0C1324] border border-slate-800 rounded-xl shadow-lg">
@@ -1215,8 +1214,8 @@ export const ClimbingArena: React.FC<ClimbingArenaProps> = ({
         </div>
       )}
 
-      <div className="w-full overflow-x-auto">
-        <div className="relative" style={{ minWidth: `${minWidthPx}px` }}>
+      <div className="w-full overflow-hidden">
+        <div className="relative w-full">
           {!backdropFailed && (
             <div
               className="absolute inset-x-0 top-0 h-28 overflow-hidden pointer-events-none"
