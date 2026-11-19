@@ -53,6 +53,8 @@ export default function App() {
     refreshRooms,
     createRoom,
     switchRoom,
+    deleteRoom,
+    leaveRoom,
     checkRoomCode,
     updateTeacherName,
     assignParticipantTrack,
@@ -284,6 +286,8 @@ export default function App() {
                 onRefreshRooms={refreshRooms}
                 onCreateRoom={createRoom}
                 onSwitchRoom={switchRoom}
+                onDeleteRoom={deleteRoom}
+                onLeaveRoom={leaveRoom}
                 onUpdateTeacherName={updateTeacherName}
                 onAssignTrack={assignParticipantTrack}
                 onAssignGroup={assignParticipantGroup}

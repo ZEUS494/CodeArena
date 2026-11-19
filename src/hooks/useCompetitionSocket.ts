@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MAX_LEVEL,
   MAX_PARTICIPANTS,
+  MAX_TEACHER_ROOMS,
   SUIT_COLOR_OPTIONS,
   createDefaultCustomization,
   generateRoomCode,
@@ -32,8 +33,8 @@ const STORAGE_KEY_PARTICIPANT_ID = 'codeclimb_participant_id';
 const STORAGE_KEY_ROOM_ID = 'codeclimb_room_id';
 const STORAGE_KEY_TEACHER_NAME = 'codeclimb_teacher_name';
 
-function getInitialRoomId(): string {
-  if (typeof window === 'undefined') return 'main';
+function getInitialRoomId(): string | null {
+  if (typeof window === 'undefined') return null;
   const hash = window.location.hash;
   if (/^#[A-Za-z0-9_-]{2,12}$/.test(hash) && hash.toLowerCase() !== '#join') {
     return normalizeRoomCode(hash.slice(1));
@@ -49,14 +50,14 @@ function getInitialRoomId(): string {
   } catch {
     // ignore
   }
-  return 'main';
+  return null;
 }
 
-function syncRoomParamToUrl(code: string) {
+function syncRoomParamToUrl(code: string | null) {
   if (typeof window === 'undefined') return;
   try {
     const url = new URL(window.location.href);
-    if (code === 'main') {
+    if (!code || code === 'main') {
       url.searchParams.delete('room');
     } else {
       url.searchParams.set('room', code);
@@ -68,7 +69,7 @@ function syncRoomParamToUrl(code: string) {
 }
 
 const INITIAL_ROOM_STATE: RoomState = {
-  roomId: 'main',
+  roomId: undefined,
   teacherName: '',
   allowedTracks: ['cpp', 'csharp', 'python'],
   status: 'lobby',
@@ -193,7 +194,7 @@ function mapDbClimbEvent(row: DbClimbEventRow): ClimbEvent {
 }
 
 export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: boolean) {
-  const [roomId, setRoomId] = useState<string>(getInitialRoomId);
+  const [roomId, setRoomId] = useState<string | null>(getInitialRoomId);
   const [teacherName, setTeacherNameState] = useState<string>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY_TEACHER_NAME) ?? '';
@@ -267,6 +268,10 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const fetchSupabaseState = useCallback(async (overrideRoomId?: string) => {
     if (!supabase) return;
     const targetRoomId = overrideRoomId ?? roomIdRef.current;
+    if (!targetRoomId) {
+      setRoomState(INITIAL_ROOM_STATE);
+      return;
+    }
 
     const [roomRes, partRes, eventsRes] = await Promise.all([
       supabase.from('rooms').select('*').eq('id', targetRoomId).maybeSingle(),
@@ -293,6 +298,18 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     }
 
     const room = roomRes.data as DbRoomRow | null;
+    if (!room) {
+      roomIdRef.current = null;
+      setRoomId(null);
+      syncRoomParamToUrl(null);
+      try {
+        sessionStorage.removeItem(STORAGE_KEY_ROOM_ID);
+      } catch {
+        // ignore
+      }
+      setRoomState(INITIAL_ROOM_STATE);
+      return;
+    }
     const participants = ((partRes.data ?? []) as DbParticipantRow[]).map(mapDbParticipant);
     const recentEvents = ((eventsRes.data ?? []) as DbClimbEventRow[]).map(mapDbClimbEvent);
 
@@ -344,6 +361,11 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     if (!isSupabaseConfigured || !supabase) return;
     const sb = supabase;
     const activeRoom = roomId;
+    if (!activeRoom) {
+      setConnected(true);
+      setRoomState(INITIAL_ROOM_STATE);
+      return;
+    }
 
     let unmounted = false;
     void fetchSupabaseState(activeRoom).then(() => {
@@ -412,7 +434,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   // Client-side countdown expiry trigger in Supabase mode (server RPC guards against duplicates)
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
-    if (roomState.status !== 'running' || !roomState.endsAt) return;
+    if (roomState.status !== 'running' || !roomState.endsAt || !roomId) return;
     const sb = supabase;
     const activeRoom = roomId;
 
@@ -588,6 +610,10 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
 
       if (isSupabaseConfigured && supabase) {
         const targetRoomId = payload.roomCode ? normalizeRoomCode(payload.roomCode) : roomIdRef.current;
+        if (!targetRoomId) {
+          setErrorMessage('Сначала введите код комнаты.');
+          return;
+        }
 
         // Verify target room exists in Supabase
         const { data: roomData, error: roomErr } = await supabase
@@ -1063,7 +1089,12 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const refreshRooms = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) return;
     const [roomsRes, partsRes] = await Promise.all([
-      supabase.from('rooms').select('*').order('updated_at', { ascending: false }).limit(25),
+      supabase
+        .from('rooms')
+        .select('*')
+        .neq('id', 'main')
+        .order('updated_at', { ascending: false })
+        .limit(25),
       supabase.from('participants').select('room_id'),
     ]);
     if (roomsRes.error) return;
@@ -1131,6 +1162,18 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         allowedTracks && allowedTracks.length > 0 ? allowedTracks : ['cpp', 'csharp', 'python'];
 
       if (isSupabaseConfigured && supabase) {
+        const { count: activeCount } = await supabase
+          .from('rooms')
+          .select('id', { count: 'exact', head: true })
+          .neq('id', 'main');
+
+        if ((activeCount ?? 0) >= MAX_TEACHER_ROOMS) {
+          setErrorMessage(
+            `Достигнут лимит: одновременно может быть открыто до ${MAX_TEACHER_ROOMS} комнат учителей. Закройте или удалите одну из существующих комнат.`
+          );
+          return null;
+        }
+
         const { data: existing } = await supabase
           .from('rooms')
           .select('id')
@@ -1185,7 +1228,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       } catch {
         // ignore
       }
-      if (isSupabaseConfigured && supabase) {
+      if (isSupabaseConfigured && supabase && roomIdRef.current) {
         await supabase
           .from('rooms')
           .update({ teacher_name: trimmed, updated_at: new Date().toISOString() })
@@ -1285,6 +1328,43 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     [fetchSupabaseState]
   );
 
+  const deleteRoom = useCallback(
+    async (targetCode: string) => {
+      if (!isSupabaseConfigured || !supabase) return;
+      setErrorMessage(null);
+      await supabase.from('rooms').delete().eq('id', targetCode);
+      if (roomIdRef.current === targetCode) {
+        stopSupabaseDemoAuto();
+        seenClimbIdsRef.current.clear();
+        roomIdRef.current = null;
+        setRoomId(null);
+        syncRoomParamToUrl(null);
+        try {
+          sessionStorage.removeItem(STORAGE_KEY_ROOM_ID);
+        } catch {
+          // ignore
+        }
+        setRoomState(INITIAL_ROOM_STATE);
+      }
+      await refreshRooms();
+    },
+    [refreshRooms, stopSupabaseDemoAuto]
+  );
+
+  const leaveRoom = useCallback(() => {
+    stopSupabaseDemoAuto();
+    seenClimbIdsRef.current.clear();
+    roomIdRef.current = null;
+    setRoomId(null);
+    syncRoomParamToUrl(null);
+    try {
+      sessionStorage.removeItem(STORAGE_KEY_ROOM_ID);
+    } catch {
+      // ignore
+    }
+    setRoomState(INITIAL_ROOM_STATE);
+  }, [stopSupabaseDemoAuto]);
+
   const clearError = useCallback(() => setErrorMessage(null), []);
   const clearLastAnswer = useCallback(() => setLastAnswer(null), []);
 
@@ -1305,6 +1385,8 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     refreshRooms,
     createRoom,
     switchRoom,
+    deleteRoom,
+    leaveRoom,
     checkRoomCode,
     updateTeacherName,
     assignParticipantTrack,

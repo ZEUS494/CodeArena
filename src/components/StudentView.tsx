@@ -41,7 +41,7 @@ const TRACK_DARK_ACCENT: Record<string, string> = {
 };
 
 interface StudentViewProps {
-  roomId: string;
+  roomId: string | null;
   roomState: RoomState;
   myParticipant: Participant | null;
   tasks: PublicTask[];
@@ -85,7 +85,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
     if (typeof window !== 'undefined' && window.location.hash.toLowerCase() === '#join') {
       return '';
     }
-    return roomId === 'main' ? '' : roomId;
+    return !roomId || roomId === 'main' ? '' : roomId;
   });
   const [roomVerified, setRoomVerified] = useState(false);
   const [checkingRoom, setCheckingRoom] = useState(false);

@@ -132,6 +132,7 @@ export const GROUP_META: Record<
 
 export const MAX_PARTICIPANTS = 16;
 export const MAX_LEVEL = 10;
+export const MAX_TEACHER_ROOMS = 5;
 
 export interface WrongAnswerEntry {
   taskId: string;

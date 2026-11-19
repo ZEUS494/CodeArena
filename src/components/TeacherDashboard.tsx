@@ -21,6 +21,7 @@ import {
   GROUP_META,
   MAX_LEVEL,
   MAX_PARTICIPANTS,
+  MAX_TEACHER_ROOMS,
   TRACK_LIST,
   type GroupId,
   type RoomState,
@@ -52,7 +53,7 @@ const TIMER_PRESETS: { label: string; minutes: number | null }[] = [
 ];
 
 interface TeacherDashboardProps {
-  roomId: string;
+  roomId: string | null;
   teacherName: string;
   availableRooms: RoomSummary[];
   roomState: RoomState;
@@ -65,6 +66,8 @@ interface TeacherDashboardProps {
     allowedTracks?: TrackId[]
   ) => Promise<string | null>;
   onSwitchRoom: (targetCode: string) => Promise<boolean>;
+  onDeleteRoom: (targetCode: string) => Promise<void>;
+  onLeaveRoom: () => void;
   onUpdateTeacherName: (name: string) => Promise<void>;
   onAssignTrack: (participantId: string, track: TrackId) => Promise<void>;
   onAssignGroup: (participantId: string, group: GroupId) => Promise<void>;
@@ -97,6 +100,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onRefreshRooms,
   onCreateRoom,
   onSwitchRoom,
+  onDeleteRoom,
+  onLeaveRoom,
   onUpdateTeacherName,
   onAssignTrack,
   onAssignGroup,
@@ -161,6 +166,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   }, []);
 
   const handleCopyCode = async () => {
+    if (!roomId) return;
     try {
       await navigator.clipboard.writeText(roomId);
       setCopiedCode(true);
@@ -231,6 +237,178 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     (p) => p.level < MAX_LEVEL
   );
 
+  // If teacher has not created or selected a room yet, show the Room Creation / Selection screen
+  if (!roomId) {
+    const limitReached = availableRooms.length >= MAX_TEACHER_ROOMS;
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="bg-[#121B2F] border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                Панель преподавателя — создание комнаты
+              </h1>
+              <p className="text-sm text-slate-400">
+                Создайте свою комнату с коротким кодом и выберите предметы, чтобы ученики могли подключиться.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-[#0B1120] border border-slate-800 text-xs font-mono text-slate-300 tabular-nums">
+              Активных комнат: <strong className={limitReached ? 'text-rose-400' : 'text-sky-300'}>{availableRooms.length}</strong> / {MAX_TEACHER_ROOMS}
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="flex items-center justify-between gap-2 p-3.5 text-sm text-rose-200 bg-rose-500/15 border border-rose-500/30 rounded-lg">
+              <span>{errorMessage}</span>
+              <button
+                type="button"
+                onClick={onClearError}
+                className="text-rose-300 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await onUpdateTeacherName(teacherInput);
+              await onCreateRoom(customRoomInput || undefined, teacherInput, selectedRoomTracks);
+              setCustomRoomInput('');
+            }}
+            className="space-y-5"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Имя преподавателя
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={40}
+                  value={teacherInput}
+                  onChange={(e) => setTeacherInput(e.target.value)}
+                  placeholder="Например: Анна Сергеевна"
+                  className="w-full px-3.5 py-2.5 text-sm bg-[#0B1120] border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Короткий код комнаты (необязательно)
+                </label>
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={customRoomInput}
+                  onChange={(e) => setCustomRoomInput(e.target.value.toUpperCase())}
+                  placeholder="Пусто — сгенерируется (напр. K7M2P)"
+                  className="w-full px-3.5 py-2.5 text-sm font-mono bg-[#0B1120] border border-slate-700 rounded-lg text-sky-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="block text-xs font-semibold text-slate-300">
+                Предметы для этой комнаты
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {TRACK_LIST.map((t) => {
+                  const checked = selectedRoomTracks.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleRoomTrack(t.id)}
+                      className={`px-3.5 py-2 text-xs font-mono font-semibold rounded-lg border transition-colors cursor-pointer ${
+                        checked
+                          ? 'bg-[#2563EB]/25 border-sky-400 text-white'
+                          : 'bg-[#0B1120] border-slate-800 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      {checked ? '✓ ' : ''}
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={limitReached || !teacherInput.trim()}
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+            >
+              + Создать комнату
+            </button>
+          </form>
+        </div>
+
+        <div className="bg-[#121B2F] border border-slate-800 rounded-xl p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-white">
+              Активные комнаты ({availableRooms.length} / {MAX_TEACHER_ROOMS})
+            </h2>
+            <button
+              type="button"
+              onClick={() => void onRefreshRooms()}
+              className="text-xs font-semibold text-sky-300 hover:text-white cursor-pointer"
+            >
+              Обновить список
+            </button>
+          </div>
+
+          {availableRooms.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              Пока нет ни одной открытой комнаты. Создайте первую комнату выше.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {availableRooms.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between gap-3 p-3.5 bg-[#0B1120] border border-slate-800 rounded-lg"
+                >
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-bold text-sky-300">{r.id}</span>
+                      <span className="text-xs text-slate-500 tabular-nums">
+                        {r.participantCount} уч.
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-300 truncate">
+                      {r.teacherName || 'Без имени'} ·{' '}
+                      {r.allowedTracks.map((id) => TRACK_LIST.find((t) => t.id === id)?.label ?? id).join(', ')}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => void onSwitchRoom(r.id)}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-md transition-colors cursor-pointer"
+                    >
+                      Открыть
+                    </button>
+                    <button
+                      type="button"
+                      title="Удалить комнату"
+                      onClick={() => void onDeleteRoom(r.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 bg-slate-900 border border-slate-800 rounded-md transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Show Championship Podium Screen automatically when finished
   if (roomState.status === 'finished' && !showArenaAfterFinish) {
     return (
@@ -283,13 +461,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={async () => {
-                await onCreateRoom(undefined, teacherInput, selectedRoomTracks);
-                setRoomPanelOpen(false);
-              }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors cursor-pointer"
+              onClick={onLeaveRoom}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 bg-[#0B1120] border border-slate-700 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
             >
-              + Новая комната
+              Все комнаты ({availableRooms.length}/{MAX_TEACHER_ROOMS})
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDeleteRoom(roomId)}
+              title="Удалить эту комнату и освободить слот"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-300 bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 rounded-lg transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Закрыть комнату
             </button>
             <button
               type="button"
@@ -299,7 +483,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-200 bg-[#0B1120] border border-slate-700 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
             >
-              {roomPanelOpen ? 'Скрыть настройки комнат' : 'Сменить учителя / комнату'}
+              {roomPanelOpen ? 'Скрыть настройки' : 'Настройки / новая'}
             </button>
           </div>
         </div>
