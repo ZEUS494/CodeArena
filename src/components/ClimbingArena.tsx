@@ -1175,6 +1175,7 @@ export const ClimbingArena: React.FC<ClimbingArenaProps> = ({
 
   useEffect(() => {
     if (!hasActiveClimb) return;
+    setNow(Date.now());
     let rafId = 0;
     const tick = () => {
       setNow(Date.now());

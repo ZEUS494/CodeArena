@@ -830,6 +830,8 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
 
         const res = data as {
           correct?: boolean;
+          newLevel?: number;
+          finished?: boolean;
           message?: string;
           error?: string;
         } | null;
@@ -840,6 +842,35 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         }
 
         const isCorrect = Boolean(res?.correct);
+        if (isCorrect) {
+          const me = roomStateRef.current.participants.find(
+            (p) => p.id === myIdRef.current
+          );
+          if (me) {
+            const targetLvl =
+              typeof res?.newLevel === 'number'
+                ? res.newLevel
+                : Math.min(MAX_LEVEL, me.level + 1);
+            if (targetLvl > me.level) {
+              triggerClimbAnimation({
+                id: `submit-${me.id}-${targetLvl}`,
+                participantId: me.id,
+                participantName: `${me.firstName} ${me.lastName}`,
+                track: me.track,
+                group: me.group,
+                fromLevel: me.level,
+                toLevel: targetLvl,
+                timestamp: Date.now(),
+                finished: Boolean(res?.finished) || targetLvl >= MAX_LEVEL,
+              });
+              if (Boolean(res?.finished) || targetLvl >= MAX_LEVEL) {
+                playVictorySound(soundRef.current);
+              } else {
+                playHookClimbSound(targetLvl, soundRef.current);
+              }
+            }
+          }
+        }
         setLastAnswer({
           taskId,
           correct: isCorrect,
