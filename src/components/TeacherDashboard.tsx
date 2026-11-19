@@ -133,6 +133,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [selectedRoomTracks, setSelectedRoomTracks] = useState<TrackId[]>(['cpp', 'csharp', 'python']);
   const [selectedGroupCount, setSelectedGroupCount] = useState<number>(1);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
 
   const toggleRoomTrack = (id: TrackId) => {
     setSelectedRoomTracks((prev) => {
@@ -930,9 +931,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           participants={activeGroupParticipants}
           activeClimbs={activeClimbs}
           screenTitle={`Экран арены — ${activeGroup}`}
-          screenSubtitle={`Участников в группе: ${activeGroupParticipants.length} · Всего в зале: ${roomState.participants.length}/${MAX_PARTICIPANTS}`}
+          screenSubtitle={`Участников в группе: ${activeGroupParticipants.length} · Всего в зале: ${roomState.participants.length}/${roomState.maxParticipants}`}
           screenAccent={activeGroupMeta.accent}
-          canQuickStep={true}
+          canQuickStep={demoOpen}
           onQuickStep={(id) => onDemoStep(id)}
         />
 
@@ -1027,19 +1028,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             <div className="px-6 py-12 text-center space-y-4">
               <p className="text-sm text-slate-300 max-w-md mx-auto">
                 {roomState.participants.length === 0
-                  ? `Пока никто не подключился. Отправьте ученикам ссылку или добавьте ${MAX_PARTICIPANTS} тестовых участников по всем 3 группам.`
-                  : `В «${activeGroup}» пока нет участников. Переключите экран на другую группу или добавьте тестовых участников.`}
+                  ? `Пока никто не подключился. Назовите ученикам код комнаты «${roomId}» и отправьте ссылку.`
+                  : `В «${activeGroup}» пока нет участников.`}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={onSeedDemo}
-                  disabled={roomState.participants.length >= MAX_PARTICIPANTS}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#2563EB] rounded-lg hover:bg-[#1D4ED8] disabled:opacity-40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <Users className="w-4 h-4" />
-                  Заполнить {MAX_PARTICIPANTS} тестовых (3 группы)
-                </button>
                 <button
                   type="button"
                   onClick={onOpenStudentTab}
@@ -1165,15 +1157,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         </td>
                         <td className="py-3 pl-3 pr-6 text-right">
                           <div className="inline-flex items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={p.level >= MAX_LEVEL}
-                              onClick={() => onDemoStep(p.id)}
-                              title="Тестовый подъём на 1 этаж"
-                              className="px-2.5 py-1 text-xs font-semibold text-sky-300 bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-35 disabled:cursor-not-allowed rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                            >
-                              +1 этаж
-                            </button>
+                            {demoOpen && (
+                              <button
+                                type="button"
+                                disabled={p.level >= MAX_LEVEL}
+                                onClick={() => onDemoStep(p.id)}
+                                title="Тестовый подъём на 1 этаж"
+                                className="px-2.5 py-1 text-xs font-semibold text-sky-300 bg-sky-500/15 hover:bg-sky-500/25 disabled:opacity-35 disabled:cursor-not-allowed rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                              >
+                                +1 этаж
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => onRemoveParticipant(p.id)}
@@ -1243,58 +1237,69 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
 
           <div className="bg-[#121B2F] border border-slate-800 rounded-xl p-5 space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-white">
-                Визуальное тестирование
-              </h2>
-              <p className="text-xs text-slate-400">
-                Заполните 16 тестовых участников по всем 3 группам и переключайтесь между экранами.
-              </p>
-            </div>
-
-            <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <h2 className="text-base font-semibold text-white">
+                  Демо-режим
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Тестовое заполнение и проверка анимации подъёмов
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={onSeedDemo}
-                disabled={roomState.participants.length >= MAX_PARTICIPANTS}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                onClick={() => setDemoOpen((prev) => !prev)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-200 bg-[#0B1120] border border-slate-700 hover:border-slate-500 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Users className="w-3.5 h-3.5" />
-                Добавить тестовых участников (до {MAX_PARTICIPANTS})
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onDemoStep(undefined, activeGroup)}
-                disabled={activeGroupParticipants.length === 0 || !activeGroupHasUnfinished}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap cursor-pointer"
-              >
-                <TrendingUp className="w-3.5 h-3.5" />
-                Подъём +1 этаж в «{activeGroup}»
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onToggleDemoAuto(!roomState.demoAutoRunning)}
-                className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                  roomState.demoAutoRunning
-                    ? 'text-slate-950 bg-amber-400 hover:bg-amber-300'
-                    : 'text-white bg-[#2563EB] hover:bg-[#1D4ED8]'
-                }`}
-              >
-                {roomState.demoAutoRunning ? (
-                  <>
-                    <Pause className="w-3.5 h-3.5" />
-                    Остановить авто-демо
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-3.5 h-3.5" />
-                    Запустить авто-демо (все 3 группы)
-                  </>
-                )}
+                {demoOpen ? 'Скрыть' : 'Открыть'}
               </button>
             </div>
+
+            {demoOpen && (
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={onSeedDemo}
+                  disabled={roomState.participants.length >= roomState.maxParticipants}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  Добавить тестовых участников (до {roomState.maxParticipants})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onDemoStep(undefined, activeGroup)}
+                  disabled={activeGroupParticipants.length === 0 || !activeGroupHasUnfinished}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-slate-100 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  Подъём +1 этаж в «{activeGroup}»
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onToggleDemoAuto(!roomState.demoAutoRunning)}
+                  className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                    roomState.demoAutoRunning
+                      ? 'text-slate-950 bg-amber-400 hover:bg-amber-300'
+                      : 'text-white bg-[#2563EB] hover:bg-[#1D4ED8]'
+                  }`}
+                >
+                  {roomState.demoAutoRunning ? (
+                    <>
+                      <Pause className="w-3.5 h-3.5" />
+                      Остановить авто-демо
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Запустить авто-демо
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {roomState.recentEvents.length > 0 && (
               <div className="pt-3 border-t border-slate-800 space-y-2">
