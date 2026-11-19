@@ -1,20 +1,26 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Высота Кода (CodeArena)
 
-# Run and deploy your AI Studio app
+Интерактивная соревновательная платформа для проведения командных и индивидуальных олимпиад по программированию (`C++`, `C#`, `Python`) в реальном времени.
 
-This contains everything you need to run your app locally.
+## Возможности
 
-View your app in AI Studio: https://ai.studio/apps/9fa9fc55-c5cd-407d-a6a5-389cdee30a59
+- **3 направления:** `C++`, `C#`, `Python` (по 10 задач на скалодроме).
+- **До 16 участников в комнате** с разделением на 3 группы и кастомизацией персонажа.
+- **Режим реального времени:** через **Supabase Realtime** (для онлайн-работы на GitHub Pages) или встроенный **WebSocket-сервер** (для локальной сети).
+- **Серверная проверка ответов:** в онлайн-режиме ответы проверяются внутри PostgreSQL (Supabase RPC), чтобы ученики не могли подсмотреть их в браузере.
+- **Архив результатов:** разбор ошибок и экспорт результатов в CSV (Excel).
 
-## Run Locally
+## Локальный запуск
 
-**Prerequisites:**  Node.js
+Требуется **Node.js 20+**.
 
+```bash
+npm install
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Приложение откроется на `http://localhost:3000`.
+
+## Онлайн-деплой (GitHub Pages + Supabase)
+
+Подробная пошаговая инструкция находится в [README_DEPLOY.md](README_DEPLOY.md).

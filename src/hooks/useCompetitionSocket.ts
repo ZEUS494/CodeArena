@@ -16,7 +16,7 @@ import {
   type TrackId,
   type WrongAnswerEntry,
 } from '../shared/types.ts';
-import { getPublicTasks } from '../shared/tasks.ts';
+import { getPublicTasks } from '../shared/publicTasks.ts';
 import { DEMO_ROSTER } from '../shared/demoRoster.ts';
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient.ts';
 import {
@@ -507,10 +507,27 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     async (payload: { firstName: string; lastName: string; track: TrackId; group: GroupId }) => {
       setErrorMessage(null);
 
+      const first = payload.firstName.trim();
+      const last = payload.lastName.trim();
+      if (!first || !last) {
+        setErrorMessage('Введите имя и фамилию.');
+        return;
+      }
+
       if (isSupabaseConfigured && supabase) {
         const current = roomStateRef.current.participants;
         if (current.length >= MAX_PARTICIPANTS) {
           setErrorMessage(`Достигнут лимит участников (${MAX_PARTICIPANTS} из ${MAX_PARTICIPANTS}).`);
+          return;
+        }
+
+        const fullLower = `${first} ${last}`.toLowerCase();
+        if (
+          current.some(
+            (p) => `${p.firstName} ${p.lastName}`.trim().toLowerCase() === fullLower
+          )
+        ) {
+          setErrorMessage('Участник с таким именем и фамилией уже находится в комнате.');
           return;
         }
 

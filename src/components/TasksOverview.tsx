@@ -2,11 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import {
   TRACK_LIST,
+  type PublicTask,
   type TeacherPreviewTask,
   type TrackId,
 } from '../shared/types.ts';
-import { getTeacherPreviewTasks } from '../shared/tasks.ts';
+import { getAllPublicTasks } from '../shared/publicTasks.ts';
 import { isSupabaseConfigured } from '../lib/supabaseClient.ts';
+
+type PreviewOrPublicTask = PublicTask & Partial<Pick<TeacherPreviewTask, 'sampleAnswer' | 'explanation'>>;
 
 const TRACK_DARK_ACCENT: Record<string, string> = {
   cpp: '#38BDF8',
@@ -18,8 +21,8 @@ export const TasksOverview: React.FC = () => {
   const [selectedTrack, setSelectedTrack] = useState<TrackId>('cpp');
   const [showAnswers, setShowAnswers] = useState(false);
   const [tasksByTrack, setTasksByTrack] = useState<
-    Record<TrackId, TeacherPreviewTask[]> | null
-  >(() => (isSupabaseConfigured ? getTeacherPreviewTasks() : null));
+    Record<TrackId, PreviewOrPublicTask[]> | null
+  >(() => (isSupabaseConfigured ? getAllPublicTasks() : null));
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,7 +38,7 @@ export const TasksOverview: React.FC = () => {
       })
       .catch(() => {
         if (active) {
-          setTasksByTrack(getTeacherPreviewTasks());
+          setTasksByTrack(getAllPublicTasks());
           setLoadError(null);
         }
       });
@@ -149,13 +152,23 @@ export const TasksOverview: React.FC = () => {
 
               {showAnswers && (
                 <div className="pt-3 border-t border-slate-800 space-y-1">
-                  <div className="text-xs text-slate-400">
-                    Правильный ответ:{' '}
-                    <code className="font-mono font-semibold text-emerald-400">
-                      {task.sampleAnswer}
-                    </code>
-                  </div>
-                  <p className="text-xs text-slate-300">{task.explanation}</p>
+                  {task.sampleAnswer ? (
+                    <>
+                      <div className="text-xs text-slate-400">
+                        Правильный ответ:{' '}
+                        <code className="font-mono font-semibold text-emerald-400">
+                          {task.sampleAnswer}
+                        </code>
+                      </div>
+                      {task.explanation && (
+                        <p className="text-xs text-slate-300">{task.explanation}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-amber-300/90">
+                      В онлайн-режиме ответы скрыты из кода сайта, чтобы ученики не могли подсмотреть их через DevTools.
+                    </p>
+                  )}
                 </div>
               )}
             </article>

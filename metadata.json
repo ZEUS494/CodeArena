@@ -1,6 +1,0 @@
-{
-  "name": "Высота Кода — Соревновательный этап",
-  "description": "Интерактивный командный соревновательный этап по программированию на C++, C# и Python с живой визуализацией подъёма участников по вертикальным полосам.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

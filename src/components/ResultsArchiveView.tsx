@@ -19,7 +19,7 @@ import {
   type SavedRoundRecord,
   type TrackId,
 } from '../shared/types.ts';
-import { getTeacherPreviewTasks } from '../shared/tasks.ts';
+import { getAllPublicTasks } from '../shared/publicTasks.ts';
 import { deleteSavedRound, fetchSavedRounds } from '../lib/resultsArchive.ts';
 import { isSupabaseConfigured } from '../lib/supabaseClient.ts';
 
@@ -73,7 +73,7 @@ export const ResultsArchiveView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const taskTitleById = useMemo(() => {
-    const preview = getTeacherPreviewTasks();
+    const preview = getAllPublicTasks();
     const map: Record<string, string> = {};
     for (const list of Object.values(preview)) {
       for (const task of list) {
