@@ -131,6 +131,7 @@ export const GROUP_META: Record<
 };
 
 export const MAX_PARTICIPANTS = 16;
+export const MAX_PER_GROUP = 8;
 export const MAX_LEVEL = 10;
 export const MAX_TEACHER_ROOMS = 5;
 
@@ -228,6 +229,7 @@ export interface RoomSummary {
   id: string;
   teacherName: string;
   allowedTracks: TrackId[];
+  groupCount: number;
   status: CompetitionStatus;
   participantCount: number;
   updatedAt?: string;
@@ -256,6 +258,7 @@ export interface RoomState {
   roomId?: string;
   teacherName?: string;
   allowedTracks?: TrackId[];
+  groupCount?: number;
   status: CompetitionStatus;
   maxParticipants: number;
   maxLevel: number;

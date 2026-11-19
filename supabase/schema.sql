@@ -10,8 +10,9 @@ create table if not exists public.rooms (
   id text primary key default 'main',
   teacher_name text not null default '',
   allowed_tracks text[] not null default '{cpp,csharp,python}',
+  group_count integer not null default 1 check (group_count between 1 and 3),
   status text not null default 'lobby' check (status in ('lobby', 'running', 'finished')),
-  max_participants integer not null default 16,
+  max_participants integer not null default 8,
   max_level integer not null default 10,
   started_at bigint,
   duration_minutes integer,
@@ -23,6 +24,7 @@ create table if not exists public.rooms (
 
 alter table public.rooms add column if not exists teacher_name text not null default '';
 alter table public.rooms add column if not exists allowed_tracks text[] not null default '{cpp,csharp,python}';
+alter table public.rooms add column if not exists group_count integer not null default 1;
 
 insert into public.rooms (id, status, max_participants, max_level)
 values ('main', 'lobby', 16, 10)

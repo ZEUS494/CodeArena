@@ -21,6 +21,7 @@ import {
   GROUP_META,
   MAX_LEVEL,
   MAX_PARTICIPANTS,
+  MAX_PER_GROUP,
   MAX_TEACHER_ROOMS,
   TRACK_LIST,
   type GroupId,
@@ -63,7 +64,8 @@ interface TeacherDashboardProps {
   onCreateRoom: (
     customCode?: string,
     customTeacherName?: string,
-    allowedTracks?: TrackId[]
+    allowedTracks?: TrackId[],
+    groupCount?: number
   ) => Promise<string | null>;
   onSwitchRoom: (targetCode: string) => Promise<boolean>;
   onDeleteRoom: (targetCode: string) => Promise<void>;
@@ -129,6 +131,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [customRoomInput, setCustomRoomInput] = useState('');
   const [joinRoomInput, setJoinRoomInput] = useState('');
   const [selectedRoomTracks, setSelectedRoomTracks] = useState<TrackId[]>(['cpp', 'csharp', 'python']);
+  const [selectedGroupCount, setSelectedGroupCount] = useState<number>(1);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
 
   const toggleRoomTrack = (id: TrackId) => {
@@ -144,6 +147,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     const list = roomState.allowedTracks;
     return list && list.length > 0 ? list : ['cpp', 'csharp', 'python'];
   }, [roomState.allowedTracks]);
+
+  const roomGroupCount = Math.min(3, Math.max(1, roomState.groupCount ?? 1));
+  const visibleGroups = useMemo(
+    () => GROUP_LIST.slice(0, roomGroupCount),
+    [roomGroupCount]
+  );
+
+  useEffect(() => {
+    if (!visibleGroups.includes(activeGroup)) {
+      setActiveGroup(visibleGroups[0]);
+    }
+  }, [visibleGroups, activeGroup]);
 
   useEffect(() => {
     void onRefreshRooms();
@@ -204,7 +219,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   };
 
   const groupSummaries = useMemo(() => {
-    return GROUP_LIST.map((grp) => {
+    return visibleGroups.map((grp) => {
       const members = roomState.participants.filter((p) => p.group === grp);
       const finishedCount = members.filter((p) => p.level >= MAX_LEVEL).length;
       const topFloor = members.reduce((max, p) => Math.max(max, p.level), 0);
@@ -217,7 +232,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         topFloor,
       };
     });
-  }, [roomState.participants]);
+  }, [roomState.participants, visibleGroups]);
 
   const activeGroupParticipants = useMemo(
     () => roomState.participants.filter((p) => p.group === activeGroup),
@@ -274,7 +289,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             onSubmit={async (e) => {
               e.preventDefault();
               await onUpdateTeacherName(teacherInput);
-              await onCreateRoom(customRoomInput || undefined, teacherInput, selectedRoomTracks);
+              await onCreateRoom(
+                customRoomInput || undefined,
+                teacherInput,
+                selectedRoomTracks,
+                selectedGroupCount
+              );
               setCustomRoomInput('');
             }}
             className="space-y-5"
@@ -310,29 +330,53 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <span className="block text-xs font-semibold text-slate-300">
-                Предметы для этой комнаты
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {TRACK_LIST.map((t) => {
-                  const checked = selectedRoomTracks.includes(t.id);
-                  return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <span className="block text-xs font-semibold text-slate-300">
+                  Предметы для этой комнаты
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {TRACK_LIST.map((t) => {
+                    const checked = selectedRoomTracks.includes(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => toggleRoomTrack(t.id)}
+                        className={`px-3.5 py-2 text-xs font-mono font-semibold rounded-lg border transition-colors cursor-pointer ${
+                          checked
+                            ? 'bg-[#2563EB]/25 border-sky-400 text-white'
+                            : 'bg-[#0B1120] border-slate-800 text-slate-400 hover:border-slate-600'
+                        }`}
+                      >
+                        {checked ? '✓ ' : ''}
+                        {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <span className="block text-xs font-semibold text-slate-300">
+                  Количество групп (до {MAX_PER_GROUP} чел. в каждой)
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3].map((cnt) => (
                     <button
-                      key={t.id}
+                      key={cnt}
                       type="button"
-                      onClick={() => toggleRoomTrack(t.id)}
-                      className={`px-3.5 py-2 text-xs font-mono font-semibold rounded-lg border transition-colors cursor-pointer ${
-                        checked
+                      onClick={() => setSelectedGroupCount(cnt)}
+                      className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                        selectedGroupCount === cnt
                           ? 'bg-[#2563EB]/25 border-sky-400 text-white'
                           : 'bg-[#0B1120] border-slate-800 text-slate-400 hover:border-slate-600'
                       }`}
                     >
-                      {checked ? '✓ ' : ''}
-                      {t.label}
+                      {cnt} {cnt === 1 ? 'группа' : 'группы'} (до {cnt * MAX_PER_GROUP} чел.)
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -537,7 +581,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 const code = await onCreateRoom(
                   customRoomInput || undefined,
                   teacherInput,
-                  selectedRoomTracks
+                  selectedRoomTracks,
+                  selectedGroupCount
                 );
                 if (code) {
                   setCustomRoomInput('');
@@ -547,7 +592,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               className="space-y-2"
             >
               <label className="block text-xs font-semibold text-slate-300">
-                Создать комнату (предметы и код)
+                Создать комнату (предметы, группы и код)
               </label>
               <div className="flex flex-wrap gap-1.5 pb-1">
                 {TRACK_LIST.map((t) => {
@@ -568,6 +613,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </button>
                   );
                 })}
+                {[1, 2, 3].map((cnt) => (
+                  <button
+                    key={`grp-${cnt}`}
+                    type="button"
+                    onClick={() => setSelectedGroupCount(cnt)}
+                    className={`px-2 py-1 text-xs font-semibold rounded-md border transition-colors cursor-pointer ${
+                      selectedGroupCount === cnt
+                        ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
+                        : 'bg-[#0B1120] border-slate-800 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    {cnt} гр.
+                  </button>
+                ))}
               </div>
               <div className="flex gap-2">
                 <input
@@ -667,10 +726,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               <span>
                 Всего участников:{' '}
                 <strong className="text-white">{roomState.participants.length}</strong> из{' '}
-                {MAX_PARTICIPANTS}
+                {roomState.maxParticipants}
               </span>
               <span aria-hidden="true">·</span>
-              <span>3 отдельных экрана групп</span>
+              <span>
+                {roomGroupCount === 1
+                  ? '1 группа (до 8 чел.)'
+                  : `${roomGroupCount} группы (до ${MAX_PER_GROUP} чел. в каждой)`}
+              </span>
               <span aria-hidden="true">·</span>
               <span>
                 {roomState.status === 'running'
@@ -738,9 +801,15 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
         </div>
 
-        {/* Dedicated Group Screen Switcher (3 separate screens, not dimmed lanes) */}
+        {/* Dedicated Group Screen Switcher */}
         <div
-          className="grid grid-cols-1 sm:grid-cols-3 gap-3"
+          className={`grid grid-cols-1 gap-3 ${
+            roomGroupCount === 1
+              ? 'sm:grid-cols-1'
+              : roomGroupCount === 2
+              ? 'sm:grid-cols-2'
+              : 'sm:grid-cols-3'
+          }`}
           role="tablist"
           aria-label="Переключение экранов групп"
         >
@@ -1056,7 +1125,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                               onChange={(e) => void onAssignGroup(p.id, e.target.value as GroupId)}
                               className="px-2 py-1 text-xs bg-[#0B1120] border border-slate-700 rounded-md text-slate-200 focus:outline-none focus:border-sky-500 cursor-pointer"
                             >
-                              {GROUP_LIST.map((g) => (
+                              {visibleGroups.map((g) => (
                                 <option key={g} value={g} className="bg-[#0B1120] text-white">
                                   {g}
                                 </option>

@@ -14,6 +14,7 @@ import {
   GROUP_META,
   MAX_LEVEL,
   MAX_PARTICIPANTS,
+  MAX_PER_GROUP,
   TRACK_LIST,
   createDefaultCustomization,
   type CharacterCustomization,
@@ -101,11 +102,23 @@ export const StudentView: React.FC<StudentViewProps> = ({
     return list && list.length > 0 ? list : ['cpp', 'csharp', 'python'];
   }, [roomState.allowedTracks]);
 
+  const roomGroupCount = Math.min(3, Math.max(1, roomState.groupCount ?? 1));
+  const visibleGroups = useMemo(
+    () => GROUP_LIST.slice(0, roomGroupCount),
+    [roomGroupCount]
+  );
+
   useEffect(() => {
     if (!allowedTracks.includes(track)) {
       setTrack(allowedTracks[0]);
     }
   }, [allowedTracks, track]);
+
+  useEffect(() => {
+    if (!visibleGroups.includes(group)) {
+      setGroup(visibleGroups[0]);
+    }
+  }, [visibleGroups, group]);
 
   const handleRoomCheckSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,7 +221,8 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
   // STEP 1: Registration Form
   if (!myParticipant) {
-    const isFull = roomState.participants.length >= MAX_PARTICIPANTS;
+    const maxInRoom = roomState.maxParticipants || roomGroupCount * MAX_PER_GROUP;
+    const isFull = roomState.participants.length >= maxInRoom;
     const previewGroupParticipants = roomState.participants.filter(
       (p) => p.group === group
     );
@@ -224,9 +238,9 @@ export const StudentView: React.FC<StudentViewProps> = ({
             <p className="text-sm text-slate-400 tabular-nums">
               Свободных мест:{' '}
               <strong className="text-white">
-                {Math.max(0, MAX_PARTICIPANTS - roomState.participants.length)}
+                {Math.max(0, maxInRoom - roomState.participants.length)}
               </strong>{' '}
-              из {MAX_PARTICIPANTS} · {MAX_LEVEL} заданий до вершины
+              из {maxInRoom} · {MAX_LEVEL} заданий до вершины
             </p>
           </div>
 
@@ -397,42 +411,48 @@ export const StudentView: React.FC<StudentViewProps> = ({
               </div>
 
               {/* Group Selector */}
-              <div className="space-y-2">
-                <span className="block text-xs font-semibold text-slate-300">
-                  Учебная группа (у каждой группы свой экран)
-                </span>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {GROUP_LIST.map((grp) => {
-                    const selected = group === grp;
-                    const grpMeta = GROUP_META[grp];
-                    const grpCount = roomState.participants.filter(
-                      (p) => p.group === grp
-                    ).length;
-                    return (
-                      <button
-                        key={grp}
-                        type="button"
-                        onClick={() => setGroup(grp)}
-                        className={`py-2.5 px-3 text-left rounded-lg border transition-colors cursor-pointer ${
-                          selected
-                            ? 'bg-[#16233E] text-white'
-                            : 'bg-[#0B1120] text-slate-300 border-slate-800 hover:border-slate-600'
-                        }`}
-                        style={
-                          selected
-                            ? { borderColor: grpMeta.accent }
-                            : undefined
-                        }
-                      >
-                        <div className="text-xs font-bold whitespace-nowrap">{grp}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5 tabular-nums">
-                          {grpCount} уч.
-                        </div>
-                      </button>
-                    );
-                  })}
+              {visibleGroups.length > 1 && (
+                <div className="space-y-2">
+                  <span className="block text-xs font-semibold text-slate-300">
+                    Учебная группа (до {MAX_PER_GROUP} чел. в группе)
+                  </span>
+                  <div className={`grid gap-2.5 ${visibleGroups.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {visibleGroups.map((grp) => {
+                      const selected = group === grp;
+                      const grpMeta = GROUP_META[grp];
+                      const grpCount = roomState.participants.filter(
+                        (p) => p.group === grp
+                      ).length;
+                      const grpFull = grpCount >= MAX_PER_GROUP;
+                      return (
+                        <button
+                          key={grp}
+                          type="button"
+                          disabled={grpFull}
+                          onClick={() => setGroup(grp)}
+                          className={`py-2.5 px-3 text-left rounded-lg border transition-colors ${
+                            grpFull
+                              ? 'bg-[#0B1120]/50 text-slate-500 border-slate-800/60 cursor-not-allowed opacity-55'
+                              : selected
+                              ? 'bg-[#16233E] text-white cursor-pointer'
+                              : 'bg-[#0B1120] text-slate-300 border-slate-800 hover:border-slate-600 cursor-pointer'
+                          }`}
+                          style={
+                            selected && !grpFull
+                              ? { borderColor: grpMeta.accent }
+                              : undefined
+                          }
+                        >
+                          <div className="text-xs font-bold whitespace-nowrap">{grp}</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 tabular-nums">
+                            {grpCount} / {MAX_PER_GROUP} уч.
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <button
                 type="submit"

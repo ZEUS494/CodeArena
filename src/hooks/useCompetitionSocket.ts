@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   MAX_LEVEL,
   MAX_PARTICIPANTS,
+  MAX_PER_GROUP,
   MAX_TEACHER_ROOMS,
   SUIT_COLOR_OPTIONS,
   createDefaultCustomization,
@@ -72,8 +73,9 @@ const INITIAL_ROOM_STATE: RoomState = {
   roomId: undefined,
   teacherName: '',
   allowedTracks: ['cpp', 'csharp', 'python'],
+  groupCount: 1,
   status: 'lobby',
-  maxParticipants: MAX_PARTICIPANTS,
+  maxParticipants: MAX_PER_GROUP,
   maxLevel: MAX_LEVEL,
   startedAt: null,
   durationMinutes: null,
@@ -103,6 +105,7 @@ interface DbRoomRow {
   id: string;
   teacher_name?: string | null;
   allowed_tracks?: TrackId[] | null;
+  group_count?: number | null;
   status: RoomState['status'];
   max_participants: number;
   max_level: number;
@@ -320,6 +323,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       }
     }
 
+    const gCount = Math.min(3, Math.max(1, Number(room.group_count ?? 1)));
     setRoomState((prev) => ({
       roomId: room?.id ?? targetRoomId,
       teacherName: room?.teacher_name ?? '',
@@ -327,8 +331,9 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         Array.isArray(room?.allowed_tracks) && room.allowed_tracks.length > 0
           ? room.allowed_tracks
           : ['cpp', 'csharp', 'python'],
+      groupCount: gCount,
       status: room?.status ?? 'lobby',
-      maxParticipants: Number(room?.max_participants ?? MAX_PARTICIPANTS),
+      maxParticipants: Number(room?.max_participants ?? gCount * MAX_PER_GROUP),
       maxLevel: Number(room?.max_level ?? MAX_LEVEL),
       startedAt: room?.started_at !== null && room?.started_at !== undefined ? Number(room.started_at) : null,
       durationMinutes: room?.duration_minutes ?? null,
@@ -618,7 +623,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         // Verify target room exists in Supabase
         const { data: roomData, error: roomErr } = await supabase
           .from('rooms')
-          .select('id')
+          .select('*')
           .eq('id', targetRoomId)
           .maybeSingle();
 
@@ -626,6 +631,9 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
           setErrorMessage(`Комната «${targetRoomId}» не найдена. Проверьте код у преподавателя.`);
           return;
         }
+        const roomRow = roomData as DbRoomRow;
+        const gCount = Math.min(3, Math.max(1, Number(roomRow.group_count ?? 1)));
+        const maxInRoom = Number(roomRow.max_participants ?? gCount * MAX_PER_GROUP);
 
         if (targetRoomId !== roomIdRef.current) {
           seenClimbIdsRef.current.clear();
@@ -645,8 +653,14 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
           .eq('room_id', targetRoomId);
         const current = ((partData ?? []) as DbParticipantRow[]).map(mapDbParticipant);
 
-        if (current.length >= MAX_PARTICIPANTS) {
-          setErrorMessage(`Достигнут лимит участников (${MAX_PARTICIPANTS} из ${MAX_PARTICIPANTS}).`);
+        if (current.length >= maxInRoom) {
+          setErrorMessage(`Достигнут лимит участников (${maxInRoom} из ${maxInRoom}).`);
+          return;
+        }
+
+        const inGroupCheck = current.filter((p) => p.group === payload.group);
+        if (inGroupCheck.length >= MAX_PER_GROUP) {
+          setErrorMessage(`В «${payload.group}» уже максимум ${MAX_PER_GROUP} участников. Выберите другую группу.`);
           return;
         }
 
@@ -1109,6 +1123,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         Array.isArray(r.allowed_tracks) && r.allowed_tracks.length > 0
           ? r.allowed_tracks
           : ['cpp', 'csharp', 'python'],
+      groupCount: Math.min(3, Math.max(1, Number(r.group_count ?? 1))),
       status: r.status,
       participantCount: counts.get(r.id) ?? 0,
       updatedAt: r.updated_at ?? undefined,
@@ -1153,13 +1168,15 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     async (
       customCode?: string,
       customTeacherName?: string,
-      allowedTracks?: TrackId[]
+      allowedTracks?: TrackId[],
+      groupCount = 1
     ): Promise<string | null> => {
       setErrorMessage(null);
       const code = customCode?.trim() ? normalizeRoomCode(customCode) : generateRoomCode(5);
       const tName = (customTeacherName ?? teacherName).trim();
       const tracks: TrackId[] =
         allowedTracks && allowedTracks.length > 0 ? allowedTracks : ['cpp', 'csharp', 'python'];
+      const gCount = Math.min(3, Math.max(1, Math.round(groupCount)));
 
       if (isSupabaseConfigured && supabase) {
         const { count: activeCount } = await supabase
@@ -1189,8 +1206,9 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
           id: code,
           teacher_name: tName,
           allowed_tracks: tracks,
+          group_count: gCount,
           status: 'lobby',
-          max_participants: MAX_PARTICIPANTS,
+          max_participants: gCount * MAX_PER_GROUP,
           max_level: MAX_LEVEL,
           updated_at: new Date().toISOString(),
         });
@@ -1293,6 +1311,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
             Array.isArray(row.allowed_tracks) && row.allowed_tracks.length > 0
               ? row.allowed_tracks
               : ['cpp', 'csharp', 'python'],
+          groupCount: Math.min(3, Math.max(1, Number(row.group_count ?? 1))),
           status: row.status,
           participantCount: roomStateRef.current.participants.length,
         };
@@ -1301,6 +1320,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         id: 'main',
         teacherName: '',
         allowedTracks: ['cpp', 'csharp', 'python'],
+        groupCount: 1,
         status: roomStateRef.current.status,
         participantCount: roomStateRef.current.participants.length,
       };
@@ -1320,6 +1340,14 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
 
   const assignParticipantGroup = useCallback(
     async (participantId: string, group: GroupId) => {
+      setErrorMessage(null);
+      const targetCount = roomStateRef.current.participants.filter(
+        (p) => p.group === group && p.id !== participantId
+      ).length;
+      if (targetCount >= MAX_PER_GROUP) {
+        setErrorMessage(`В «${group}» уже максимум ${MAX_PER_GROUP} участников.`);
+        return;
+      }
       if (isSupabaseConfigured && supabase) {
         await supabase.from('participants').update({ group_name: group }).eq('id', participantId);
         await fetchSupabaseState();
