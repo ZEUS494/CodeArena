@@ -4,6 +4,8 @@ import {
   MAX_PARTICIPANTS,
   SUIT_COLOR_OPTIONS,
   createDefaultCustomization,
+  generateRoomCode,
+  normalizeRoomCode,
   type CharacterCustomization,
   type ClimbEvent,
   type ClientMessage,
@@ -12,6 +14,7 @@ import {
   type Participant,
   type PublicTask,
   type RoomState,
+  type RoomSummary,
   type ServerMessage,
   type TrackId,
   type WrongAnswerEntry,
@@ -26,8 +29,43 @@ import {
 } from '../utils/sound.ts';
 
 const STORAGE_KEY_PARTICIPANT_ID = 'codeclimb_participant_id';
+const STORAGE_KEY_ROOM_ID = 'codeclimb_room_id';
+const STORAGE_KEY_TEACHER_NAME = 'codeclimb_teacher_name';
+
+function getInitialRoomId(): string {
+  if (typeof window === 'undefined') return 'main';
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('room');
+  if (fromUrl && fromUrl.trim()) {
+    return normalizeRoomCode(fromUrl);
+  }
+  try {
+    const saved = sessionStorage.getItem(STORAGE_KEY_ROOM_ID);
+    if (saved && saved.trim()) return normalizeRoomCode(saved);
+  } catch {
+    // ignore
+  }
+  return 'main';
+}
+
+function syncRoomParamToUrl(code: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    if (code === 'main') {
+      url.searchParams.delete('room');
+    } else {
+      url.searchParams.set('room', code);
+    }
+    window.history.replaceState({}, '', url.toString());
+  } catch {
+    // ignore
+  }
+}
 
 const INITIAL_ROOM_STATE: RoomState = {
+  roomId: 'main',
+  teacherName: '',
   status: 'lobby',
   maxParticipants: MAX_PARTICIPANTS,
   maxLevel: MAX_LEVEL,
@@ -57,6 +95,7 @@ export interface ActiveClimbAnimation {
 
 interface DbRoomRow {
   id: string;
+  teacher_name?: string | null;
   status: RoomState['status'];
   max_participants: number;
   max_level: number;
@@ -65,6 +104,7 @@ interface DbRoomRow {
   ends_at: number | null;
   finished_at: number | null;
   finish_reason: FinishReason | null;
+  updated_at?: string | null;
 }
 
 interface DbParticipantRow {
@@ -147,6 +187,15 @@ function mapDbClimbEvent(row: DbClimbEventRow): ClimbEvent {
 }
 
 export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: boolean) {
+  const [roomId, setRoomId] = useState<string>(getInitialRoomId);
+  const [teacherName, setTeacherNameState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_TEACHER_NAME) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [availableRooms, setAvailableRooms] = useState<RoomSummary[]>([]);
   const [roomState, setRoomState] = useState<RoomState>(INITIAL_ROOM_STATE);
   const [connected, setConnected] = useState(false);
   const [myParticipantId, setMyParticipantId] = useState<string | null>(() => {
@@ -169,11 +218,13 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const soundRef = useRef(soundEnabled);
   const myIdRef = useRef(myParticipantId);
   const roomStateRef = useRef(roomState);
+  const roomIdRef = useRef(roomId);
 
   roleRef.current = role;
   soundRef.current = soundEnabled;
   myIdRef.current = myParticipantId;
   roomStateRef.current = roomState;
+  roomIdRef.current = roomId;
 
   const sendMessage = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -207,20 +258,21 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   // =========================================================================
   // SUPABASE REALTIME SYNC (when VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY set)
   // =========================================================================
-  const fetchSupabaseState = useCallback(async () => {
+  const fetchSupabaseState = useCallback(async (overrideRoomId?: string) => {
     if (!supabase) return;
+    const targetRoomId = overrideRoomId ?? roomIdRef.current;
 
     const [roomRes, partRes, eventsRes] = await Promise.all([
-      supabase.from('rooms').select('*').eq('id', 'main').maybeSingle(),
+      supabase.from('rooms').select('*').eq('id', targetRoomId).maybeSingle(),
       supabase
         .from('participants')
         .select('*')
-        .eq('room_id', 'main')
+        .eq('room_id', targetRoomId)
         .order('joined_at', { ascending: true }),
       supabase
         .from('climb_events')
         .select('*')
-        .eq('room_id', 'main')
+        .eq('room_id', targetRoomId)
         .order('created_at', { ascending: false })
         .limit(20),
     ]);
@@ -246,6 +298,8 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     }
 
     setRoomState((prev) => ({
+      roomId: room?.id ?? targetRoomId,
+      teacherName: room?.teacher_name ?? '',
       status: room?.status ?? 'lobby',
       maxParticipants: Number(room?.max_participants ?? MAX_PARTICIPANTS),
       maxLevel: Number(room?.max_level ?? MAX_LEVEL),
@@ -279,31 +333,32 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     const sb = supabase;
+    const activeRoom = roomId;
 
     let unmounted = false;
-    void fetchSupabaseState().then(() => {
+    void fetchSupabaseState(activeRoom).then(() => {
       if (!unmounted) setConnected(true);
     });
 
     const channel = sb
-      .channel('codeclimb_room_main')
+      .channel(`codeclimb_room_${activeRoom}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'rooms', filter: 'id=eq.main' },
+        { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${activeRoom}` },
         () => {
-          void fetchSupabaseState();
+          void fetchSupabaseState(activeRoom);
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'participants', filter: 'room_id=eq.main' },
+        { event: '*', schema: 'public', table: 'participants', filter: `room_id=eq.${activeRoom}` },
         () => {
-          void fetchSupabaseState();
+          void fetchSupabaseState(activeRoom);
         }
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'climb_events', filter: 'room_id=eq.main' },
+        { event: 'INSERT', schema: 'public', table: 'climb_events', filter: `room_id=eq.${activeRoom}` },
         (payload) => {
           const row = payload.new as DbClimbEventRow;
           if (!row?.id || seenClimbIdsRef.current.has(row.id)) return;
@@ -342,25 +397,26 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       }
       void sb.removeChannel(channel);
     };
-  }, [fetchSupabaseState, triggerClimbAnimation]);
+  }, [fetchSupabaseState, triggerClimbAnimation, roomId]);
 
   // Client-side countdown expiry trigger in Supabase mode (server RPC guards against duplicates)
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     if (roomState.status !== 'running' || !roomState.endsAt) return;
     const sb = supabase;
+    const activeRoom = roomId;
 
     const msLeft = roomState.endsAt - Date.now();
     if (msLeft <= 0) {
-      void sb.rpc('finalize_competition_round', { p_reason: 'time_up' });
+      void sb.rpc('finalize_competition_round', { p_reason: 'time_up', p_room_id: activeRoom });
       return;
     }
     const timer = window.setTimeout(() => {
-      void sb.rpc('finalize_competition_round', { p_reason: 'time_up' });
+      void sb.rpc('finalize_competition_round', { p_reason: 'time_up', p_room_id: activeRoom });
     }, msLeft + 250);
 
     return () => window.clearTimeout(timer);
-  }, [roomState.status, roomState.endsAt]);
+  }, [roomState.status, roomState.endsAt, roomId]);
 
   // =========================================================================
   // LOCAL WEBSOCKET SYNC (when Supabase env vars are not configured)
@@ -504,7 +560,13 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   // UNIFIED ACTIONS (Dual-Mode: Supabase or WebSocket)
   // =========================================================================
   const joinAsStudent = useCallback(
-    async (payload: { firstName: string; lastName: string; track: TrackId; group: GroupId }) => {
+    async (payload: {
+      firstName: string;
+      lastName: string;
+      track: TrackId;
+      group: GroupId;
+      roomCode?: string;
+    }) => {
       setErrorMessage(null);
 
       const first = payload.firstName.trim();
@@ -515,7 +577,38 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       }
 
       if (isSupabaseConfigured && supabase) {
-        const current = roomStateRef.current.participants;
+        const targetRoomId = payload.roomCode ? normalizeRoomCode(payload.roomCode) : roomIdRef.current;
+
+        // Verify target room exists in Supabase
+        const { data: roomData, error: roomErr } = await supabase
+          .from('rooms')
+          .select('id')
+          .eq('id', targetRoomId)
+          .maybeSingle();
+
+        if (roomErr || !roomData) {
+          setErrorMessage(`Комната «${targetRoomId}» не найдена. Проверьте код у преподавателя.`);
+          return;
+        }
+
+        if (targetRoomId !== roomIdRef.current) {
+          seenClimbIdsRef.current.clear();
+          roomIdRef.current = targetRoomId;
+          setRoomId(targetRoomId);
+          syncRoomParamToUrl(targetRoomId);
+          try {
+            sessionStorage.setItem(STORAGE_KEY_ROOM_ID, targetRoomId);
+          } catch {
+            // ignore
+          }
+        }
+
+        const { data: partData } = await supabase
+          .from('participants')
+          .select('*')
+          .eq('room_id', targetRoomId);
+        const current = ((partData ?? []) as DbParticipantRow[]).map(mapDbParticipant);
+
         if (current.length >= MAX_PARTICIPANTS) {
           setErrorMessage(`Достигнут лимит участников (${MAX_PARTICIPANTS} из ${MAX_PARTICIPANTS}).`);
           return;
@@ -545,9 +638,9 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         const { data, error } = await supabase
           .from('participants')
           .insert({
-            room_id: 'main',
-            first_name: payload.firstName.trim(),
-            last_name: payload.lastName.trim(),
+            room_id: targetRoomId,
+            first_name: first,
+            last_name: last,
             track: payload.track,
             group_name: payload.group,
             level: 0,
@@ -756,7 +849,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
             finish_reason: null,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', 'main');
+          .eq('id', roomIdRef.current);
         await fetchSupabaseState();
         return;
       }
@@ -778,6 +871,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
       stopSupabaseDemoAuto();
       await supabase.rpc('finalize_competition_round', {
         p_reason: 'teacher_stopped',
+        p_room_id: roomIdRef.current,
       });
       await fetchSupabaseState();
       return;
@@ -788,6 +882,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const resetProgress = useCallback(async () => {
     if (isSupabaseConfigured && supabase) {
       stopSupabaseDemoAuto();
+      const activeRoom = roomIdRef.current;
       await Promise.all([
         supabase
           .from('rooms')
@@ -799,7 +894,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
             finish_reason: null,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', 'main'),
+          .eq('id', activeRoom),
         supabase
           .from('participants')
           .update({
@@ -814,8 +909,8 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
             final_rank: null,
             last_climb_at: null,
           })
-          .eq('room_id', 'main'),
-        supabase.from('climb_events').delete().eq('room_id', 'main'),
+          .eq('room_id', activeRoom),
+        supabase.from('climb_events').delete().eq('room_id', activeRoom),
       ]);
       seenClimbIdsRef.current.clear();
       await fetchSupabaseState();
@@ -827,9 +922,10 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
   const clearRoom = useCallback(async () => {
     if (isSupabaseConfigured && supabase) {
       stopSupabaseDemoAuto();
+      const activeRoom = roomIdRef.current;
       await Promise.all([
-        supabase.from('participants').delete().eq('room_id', 'main'),
-        supabase.from('climb_events').delete().eq('room_id', 'main'),
+        supabase.from('participants').delete().eq('room_id', activeRoom),
+        supabase.from('climb_events').delete().eq('room_id', activeRoom),
         supabase
           .from('rooms')
           .update({
@@ -841,7 +937,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
             finish_reason: null,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', 'main'),
+          .eq('id', activeRoom),
       ]);
       seenClimbIdsRef.current.clear();
       await fetchSupabaseState();
@@ -876,7 +972,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         if (dup) continue;
         count += 1;
         toInsert.push({
-          room_id: 'main',
+          room_id: roomIdRef.current,
           first_name: c.firstName,
           last_name: c.lastName,
           track: c.track,
@@ -904,6 +1000,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
         await supabase.rpc('advance_demo_participant', {
           p_participant_id: participantId ?? null,
           p_group: group ?? null,
+          p_room_id: roomIdRef.current,
         });
         await fetchSupabaseState();
         return;
@@ -939,6 +1036,7 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
           await sb.rpc('advance_demo_participant', {
             p_participant_id: null,
             p_group: null,
+            p_room_id: roomIdRef.current,
           });
         };
         void tick();
@@ -952,6 +1050,153 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     [sendMessage, seedDemoParticipants, resetProgress, stopSupabaseDemoAuto]
   );
 
+  const refreshRooms = useCallback(async () => {
+    if (!isSupabaseConfigured || !supabase) return;
+    const [roomsRes, partsRes] = await Promise.all([
+      supabase.from('rooms').select('*').order('updated_at', { ascending: false }).limit(25),
+      supabase.from('participants').select('room_id'),
+    ]);
+    if (roomsRes.error) return;
+    const counts = new Map<string, number>();
+    for (const row of (partsRes.data ?? []) as { room_id: string }[]) {
+      counts.set(row.room_id, (counts.get(row.room_id) ?? 0) + 1);
+    }
+    const list: RoomSummary[] = ((roomsRes.data ?? []) as DbRoomRow[]).map((r) => ({
+      id: r.id,
+      teacherName: r.teacher_name ?? '',
+      status: r.status,
+      participantCount: counts.get(r.id) ?? 0,
+      updatedAt: r.updated_at ?? undefined,
+    }));
+    setAvailableRooms(list);
+  }, []);
+
+  const switchRoom = useCallback(
+    async (targetCode: string): Promise<boolean> => {
+      const normalized = normalizeRoomCode(targetCode);
+      setErrorMessage(null);
+      if (isSupabaseConfigured && supabase) {
+        const { data, error } = await supabase
+          .from('rooms')
+          .select('id')
+          .eq('id', normalized)
+          .maybeSingle();
+        if (error || !data) {
+          setErrorMessage(`Комната «${normalized}» не найдена.`);
+          return false;
+        }
+      }
+      stopSupabaseDemoAuto();
+      seenClimbIdsRef.current.clear();
+      roomIdRef.current = normalized;
+      setRoomId(normalized);
+      syncRoomParamToUrl(normalized);
+      try {
+        sessionStorage.setItem(STORAGE_KEY_ROOM_ID, normalized);
+      } catch {
+        // ignore
+      }
+      if (isSupabaseConfigured && supabase) {
+        await fetchSupabaseState(normalized);
+      }
+      return true;
+    },
+    [fetchSupabaseState, stopSupabaseDemoAuto]
+  );
+
+  const createRoom = useCallback(
+    async (customCode?: string, customTeacherName?: string): Promise<string | null> => {
+      setErrorMessage(null);
+      const code = customCode?.trim() ? normalizeRoomCode(customCode) : generateRoomCode(5);
+      const tName = (customTeacherName ?? teacherName).trim();
+
+      if (isSupabaseConfigured && supabase) {
+        const { data: existing } = await supabase
+          .from('rooms')
+          .select('id')
+          .eq('id', code)
+          .maybeSingle();
+
+        if (existing) {
+          setErrorMessage(`Комната с кодом «${code}» уже существует. Выберите другой код или подключитесь к ней.`);
+          return null;
+        }
+
+        const { error } = await supabase.from('rooms').insert({
+          id: code,
+          teacher_name: tName,
+          status: 'lobby',
+          max_participants: MAX_PARTICIPANTS,
+          max_level: MAX_LEVEL,
+          updated_at: new Date().toISOString(),
+        });
+
+        if (error) {
+          setErrorMessage(error.message || 'Не удалось создать комнату.');
+          return null;
+        }
+
+        stopSupabaseDemoAuto();
+        seenClimbIdsRef.current.clear();
+        roomIdRef.current = code;
+        setRoomId(code);
+        syncRoomParamToUrl(code);
+        try {
+          sessionStorage.setItem(STORAGE_KEY_ROOM_ID, code);
+        } catch {
+          // ignore
+        }
+        await Promise.all([fetchSupabaseState(code), refreshRooms()]);
+        return code;
+      }
+
+      return code;
+    },
+    [teacherName, fetchSupabaseState, refreshRooms, stopSupabaseDemoAuto]
+  );
+
+  const updateTeacherName = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      setTeacherNameState(trimmed);
+      try {
+        localStorage.setItem(STORAGE_KEY_TEACHER_NAME, trimmed);
+      } catch {
+        // ignore
+      }
+      if (isSupabaseConfigured && supabase) {
+        await supabase
+          .from('rooms')
+          .update({ teacher_name: trimmed, updated_at: new Date().toISOString() })
+          .eq('id', roomIdRef.current);
+        await Promise.all([fetchSupabaseState(), refreshRooms()]);
+      }
+    },
+    [fetchSupabaseState, refreshRooms]
+  );
+
+  const extendTimer = useCallback(
+    async (addMinutes: number) => {
+      if (!isSupabaseConfigured || !supabase) return;
+      const cur = roomStateRef.current;
+      if (cur.status !== 'running') return;
+      const now = Date.now();
+      const baseEnd = cur.endsAt && cur.endsAt > now ? cur.endsAt : now;
+      const newEndsAt = baseEnd + addMinutes * 60_000;
+      const newDuration = (cur.durationMinutes ?? 0) + addMinutes;
+      await supabase
+        .from('rooms')
+        .update({
+          duration_minutes: newDuration,
+          ends_at: newEndsAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', roomIdRef.current);
+      await fetchSupabaseState();
+    },
+    [fetchSupabaseState]
+  );
+
   const clearError = useCallback(() => setErrorMessage(null), []);
   const clearLastAnswer = useCallback(() => setLastAnswer(null), []);
 
@@ -959,6 +1204,9 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     roomState.participants.find((p) => p.id === myParticipantId) ?? null;
 
   return {
+    roomId,
+    teacherName,
+    availableRooms,
     roomState,
     connected,
     myParticipant,
@@ -966,6 +1214,11 @@ export function useCompetitionSocket(role: 'teacher' | 'student', soundEnabled: 
     lastAnswer,
     errorMessage,
     activeClimbs,
+    refreshRooms,
+    createRoom,
+    switchRoom,
+    updateTeacherName,
+    extendTimer,
     joinAsStudent,
     leaveAsStudent,
     submitAnswer,

@@ -37,6 +37,9 @@ export default function App() {
 
   const socketRole = activeTab === 'student' ? 'student' : 'teacher';
   const {
+    roomId,
+    teacherName,
+    availableRooms,
     roomState,
     connected,
     myParticipant,
@@ -44,6 +47,11 @@ export default function App() {
     lastAnswer,
     errorMessage,
     activeClimbs,
+    refreshRooms,
+    createRoom,
+    switchRoom,
+    updateTeacherName,
+    extendTimer,
     joinAsStudent,
     leaveAsStudent,
     submitAnswer,
@@ -261,8 +269,18 @@ export default function App() {
           <>
             {activeTab === 'teacher' && (
               <TeacherDashboard
+                roomId={roomId}
+                teacherName={teacherName}
+                availableRooms={availableRooms}
                 roomState={roomState}
                 activeClimbs={activeClimbs}
+                errorMessage={errorMessage}
+                onRefreshRooms={refreshRooms}
+                onCreateRoom={createRoom}
+                onSwitchRoom={switchRoom}
+                onUpdateTeacherName={updateTeacherName}
+                onExtendTimer={extendTimer}
+                onClearError={clearError}
                 onStart={startCompetition}
                 onFinish={finishCompetition}
                 onResetProgress={resetProgress}
@@ -277,6 +295,7 @@ export default function App() {
 
             {activeTab === 'student' && (
               <StudentView
+                roomId={roomId}
                 roomState={roomState}
                 myParticipant={myParticipant}
                 tasks={tasks}

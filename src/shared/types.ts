@@ -223,7 +223,36 @@ export interface ClimbEvent {
   finished: boolean;
 }
 
+export interface RoomSummary {
+  id: string;
+  teacherName: string;
+  status: CompetitionStatus;
+  participantCount: number;
+  updatedAt?: string;
+}
+
+export function normalizeRoomCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return 'main';
+  if (trimmed.toLowerCase() === 'main') return 'main';
+  return trimmed
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 12) || 'main';
+}
+
+export function generateRoomCode(length = 5): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return code;
+}
+
 export interface RoomState {
+  roomId?: string;
+  teacherName?: string;
   status: CompetitionStatus;
   maxParticipants: number;
   maxLevel: number;

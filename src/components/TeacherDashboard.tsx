@@ -24,6 +24,7 @@ import {
   TRACK_LIST,
   type GroupId,
   type RoomState,
+  type RoomSummary,
 } from '../shared/types.ts';
 import type { ActiveClimbAnimation } from '../hooks/useCompetitionSocket.ts';
 import { ClimbingArena } from './ClimbingArena.tsx';
@@ -50,8 +51,18 @@ const TIMER_PRESETS: { label: string; minutes: number | null }[] = [
 ];
 
 interface TeacherDashboardProps {
+  roomId: string;
+  teacherName: string;
+  availableRooms: RoomSummary[];
   roomState: RoomState;
   activeClimbs: Record<string, ActiveClimbAnimation>;
+  errorMessage: string | null;
+  onRefreshRooms: () => Promise<void>;
+  onCreateRoom: (customCode?: string, customTeacherName?: string) => Promise<string | null>;
+  onSwitchRoom: (targetCode: string) => Promise<boolean>;
+  onUpdateTeacherName: (name: string) => Promise<void>;
+  onExtendTimer: (addMinutes: number) => Promise<void>;
+  onClearError: () => void;
   onStart: (durationMinutes?: number | null) => void;
   onFinish: () => void;
   onResetProgress: () => void;
@@ -70,8 +81,18 @@ const STATUS_LABELS: Record<RoomState['status'], string> = {
 };
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
+  roomId,
+  teacherName,
+  availableRooms,
   roomState,
   activeClimbs,
+  errorMessage,
+  onRefreshRooms,
+  onCreateRoom,
+  onSwitchRoom,
+  onUpdateTeacherName,
+  onExtendTimer,
+  onClearError,
   onStart,
   onFinish,
   onResetProgress,
@@ -85,10 +106,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [activeGroup, setActiveGroup] = useState<GroupId>('Группа 1');
   const [tableScope, setTableScope] = useState<'group' | 'all'>('group');
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [trophyFailed, setTrophyFailed] = useState(false);
   const [selectedMinutes, setSelectedMinutes] = useState<number | null>(45);
   const [customMinutesInput, setCustomMinutesInput] = useState('45');
   const [showArenaAfterFinish, setShowArenaAfterFinish] = useState(false);
+  const [teacherInput, setTeacherInput] = useState(teacherName || roomState.teacherName || '');
+  const [customRoomInput, setCustomRoomInput] = useState('');
+  const [joinRoomInput, setJoinRoomInput] = useState('');
+  const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+
+  useEffect(() => {
+    void onRefreshRooms();
+  }, [onRefreshRooms]);
+
+  useEffect(() => {
+    if (teacherName) setTeacherInput(teacherName);
+  }, [teacherName]);
 
   // Automatically reveal Podium whenever competition transitions into 'finished'
   useEffect(() => {
@@ -99,8 +133,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const studentJoinUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}${window.location.pathname}?role=student`;
-  }, []);
+    const roomQuery = roomId && roomId !== 'main' ? `&room=${encodeURIComponent(roomId)}` : '';
+    return `${window.location.origin}${window.location.pathname}?role=student${roomQuery}`;
+  }, [roomId]);
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(roomId);
+      setCopiedCode(true);
+      window.setTimeout(() => setCopiedCode(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleCopyLink = async () => {
     try {
@@ -179,6 +224,197 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   return (
     <div className="space-y-8">
+      {/* Multi-Teacher & Room Switcher Bar */}
+      <section className="bg-[#121B2F] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-400">Комната:</span>
+              <span className="px-2.5 py-1 text-sm font-mono font-bold tracking-wider text-sky-300 bg-sky-500/15 border border-sky-500/35 rounded-lg">
+                {roomId}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                title="Скопировать код комнаты"
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-300 bg-[#0B1120] border border-slate-700 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
+              >
+                {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedCode ? 'Скопировано' : 'Код'}
+              </button>
+            </div>
+
+            {(roomState.teacherName || teacherName) && (
+              <span className="text-xs text-slate-300">
+                Преподаватель: <strong className="text-white">{roomState.teacherName || teacherName}</strong>
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                await onCreateRoom(undefined, teacherInput);
+                setRoomPanelOpen(false);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors cursor-pointer"
+            >
+              + Новая комната
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRoomPanelOpen((prev) => !prev);
+                void onRefreshRooms();
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-200 bg-[#0B1120] border border-slate-700 hover:border-slate-500 rounded-lg transition-colors cursor-pointer"
+            >
+              {roomPanelOpen ? 'Скрыть настройки комнат' : 'Сменить учителя / комнату'}
+            </button>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div className="flex items-center justify-between gap-2 p-3 text-xs text-rose-200 bg-rose-500/15 border border-rose-500/30 rounded-lg">
+            <span>{errorMessage}</span>
+            <button
+              type="button"
+              onClick={onClearError}
+              className="text-rose-300 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {roomPanelOpen && (
+          <div className="pt-3 border-t border-slate-800 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void onUpdateTeacherName(teacherInput);
+              }}
+              className="space-y-2"
+            >
+              <label className="block text-xs font-semibold text-slate-300">
+                Имя преподавателя для этой комнаты
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  maxLength={40}
+                  value={teacherInput}
+                  onChange={(e) => setTeacherInput(e.target.value)}
+                  placeholder="Например: Анна Сергеевна"
+                  className="flex-1 min-w-0 px-3 py-2 text-xs bg-[#0B1120] border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Сохранить
+                </button>
+              </div>
+            </form>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const code = await onCreateRoom(customRoomInput || undefined, teacherInput);
+                if (code) {
+                  setCustomRoomInput('');
+                  setRoomPanelOpen(false);
+                }
+              }}
+              className="space-y-2"
+            >
+              <label className="block text-xs font-semibold text-slate-300">
+                Создать комнату со своим кодом
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={customRoomInput}
+                  onChange={(e) => setCustomRoomInput(e.target.value.toUpperCase())}
+                  placeholder="Код (или пусто — авто)"
+                  className="flex-1 min-w-0 px-3 py-2 text-xs font-mono bg-[#0B1120] border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Создать
+                </button>
+              </div>
+            </form>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!joinRoomInput.trim()) return;
+                const ok = await onSwitchRoom(joinRoomInput);
+                if (ok) {
+                  setJoinRoomInput('');
+                  setRoomPanelOpen(false);
+                }
+              }}
+              className="space-y-2"
+            >
+              <label className="block text-xs font-semibold text-slate-300">
+                Перейти в комнату по коду
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={joinRoomInput}
+                  onChange={(e) => setJoinRoomInput(e.target.value)}
+                  placeholder="Например: K7M2P или main"
+                  className="flex-1 min-w-0 px-3 py-2 text-xs font-mono bg-[#0B1120] border border-slate-700 rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  Открыть
+                </button>
+              </div>
+            </form>
+
+            {availableRooms.length > 0 && (
+              <div className="lg:col-span-3 pt-2 space-y-2">
+                <div className="text-xs font-semibold text-slate-400">
+                  Активные комнаты ({availableRooms.length}):
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {availableRooms.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={async () => {
+                        await onSwitchRoom(r.id);
+                        setRoomPanelOpen(false);
+                      }}
+                      className={`px-3 py-1.5 text-xs rounded-lg border transition-colors cursor-pointer flex items-center gap-2 ${
+                        r.id === roomId
+                          ? 'bg-[#2563EB]/25 border-sky-400 text-white'
+                          : 'bg-[#0B1120] border-slate-800 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="font-mono font-bold text-sky-300">{r.id}</span>
+                      {r.teacherName && <span className="text-slate-400">· {r.teacherName}</span>}
+                      <span className="text-slate-500 tabular-nums">({r.participantCount} уч.)</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* Stage Header & Controls */}
       <section className="space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
@@ -214,11 +450,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             {/* Live Countdown Clock while running */}
             {roomState.status === 'running' && (
-              <CountdownBadge
-                endsAt={roomState.endsAt}
-                startedAt={roomState.startedAt}
-                running={true}
-              />
+              <>
+                <CountdownBadge
+                  endsAt={roomState.endsAt}
+                  startedAt={roomState.startedAt}
+                  running={true}
+                />
+                {roomState.endsAt && (
+                  <button
+                    type="button"
+                    onClick={() => void onExtendTimer(5)}
+                    className="px-3 py-2 text-xs font-semibold text-sky-300 bg-sky-500/15 border border-sky-500/35 hover:bg-sky-500/25 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    +5 мин
+                  </button>
+                )}
+              </>
             )}
 
             {/* Main Competition State Action */}

@@ -40,6 +40,7 @@ const TRACK_DARK_ACCENT: Record<string, string> = {
 };
 
 interface StudentViewProps {
+  roomId: string;
   roomState: RoomState;
   myParticipant: Participant | null;
   tasks: PublicTask[];
@@ -51,6 +52,7 @@ interface StudentViewProps {
     lastName: string;
     track: TrackId;
     group: GroupId;
+    roomCode?: string;
   }) => void;
   onLeave: () => void;
   onSubmitAnswer: (taskId: string, answer: string) => void;
@@ -61,6 +63,7 @@ interface StudentViewProps {
 }
 
 export const StudentView: React.FC<StudentViewProps> = ({
+  roomId,
   roomState,
   myParticipant,
   tasks,
@@ -75,12 +78,17 @@ export const StudentView: React.FC<StudentViewProps> = ({
   onClearError,
   onClearLastAnswer,
 }) => {
+  const [roomCode, setRoomCode] = useState(roomId);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [track, setTrack] = useState<TrackId>('python');
   const [group, setGroup] = useState<GroupId>('Группа 1');
   const [answerInput, setAnswerInput] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRoomCode(roomId);
+  }, [roomId]);
 
   const solvedSet = useMemo(
     () => new Set(myParticipant?.solvedTaskIds ?? []),
@@ -144,6 +152,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
       lastName: lastName.trim(),
       track,
       group,
+      roomCode: roomCode.trim() || 'main',
     });
   };
 
@@ -209,6 +218,28 @@ export const StudentView: React.FC<StudentViewProps> = ({
             </div>
           ) : (
             <form onSubmit={handleJoinSubmit} className="space-y-5">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="student-room-code"
+                  className="block text-xs font-semibold text-slate-300"
+                >
+                  Код комнаты (от преподавателя)
+                </label>
+                <input
+                  id="student-room-code"
+                  type="text"
+                  maxLength={12}
+                  placeholder="Например: K7M2P или main"
+                  value={roomCode}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setRoomCode(val.toLowerCase() === 'main' ? 'main' : val.toUpperCase());
+                    if (errorMessage) onClearError();
+                  }}
+                  className="w-full px-3.5 py-2.5 text-sm font-mono tracking-wider bg-[#0B1120] border border-slate-700 rounded-lg text-sky-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500"
+                />
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label

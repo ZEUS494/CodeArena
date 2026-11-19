@@ -8,6 +8,7 @@ create extension if not exists pgcrypto;
 -- 1. Активная комната соревнования
 create table if not exists public.rooms (
   id text primary key default 'main',
+  teacher_name text not null default '',
   status text not null default 'lobby' check (status in ('lobby', 'running', 'finished')),
   max_participants integer not null default 16,
   max_level integer not null default 10,
@@ -18,6 +19,8 @@ create table if not exists public.rooms (
   finish_reason text check (finish_reason in ('all_finished', 'teacher_stopped', 'time_up')),
   updated_at timestamptz not null default now()
 );
+
+alter table public.rooms add column if not exists teacher_name text not null default '';
 
 insert into public.rooms (id, status, max_participants, max_level)
 values ('main', 'lobby', 16, 10)
@@ -196,8 +199,11 @@ $$;
 -- ============================================================================
 -- RPC: Завершение этапа, подсчёт мест и сохранение в постоянный архив
 -- ============================================================================
+drop function if exists public.finalize_competition_round(text);
+
 create or replace function public.finalize_competition_round(
-  p_reason text default 'teacher_stopped'
+  p_reason text default 'teacher_stopped',
+  p_room_id text default 'main'
 )
 returns uuid
 language plpgsql
@@ -209,7 +215,7 @@ declare
   v_round_id uuid;
   v_count integer;
 begin
-  select * into v_room from public.rooms where id = 'main' for update;
+  select * into v_room from public.rooms where id = p_room_id for update;
   if not found then
     return null;
   end if;
@@ -232,14 +238,14 @@ begin
           joined_at asc
       ) as rnk
     from public.participants
-    where room_id = 'main'
+    where room_id = p_room_id
   )
   update public.participants p
   set final_rank = r.rnk
   from ranked r
   where p.id = r.id;
 
-  select count(*) into v_count from public.participants where room_id = 'main';
+  select count(*) into v_count from public.participants where room_id = p_room_id;
 
   -- Сохраняем постоянный снимок раунда в архив, если были участники
   if v_count > 0 then
@@ -300,7 +306,7 @@ begin
       p.finished_at,
       p.is_demo
     from public.participants p
-    where p.room_id = 'main';
+    where p.room_id = p_room_id;
   end if;
 
   update public.rooms
@@ -309,7 +315,7 @@ begin
     finished_at = v_now,
     finish_reason = coalesce(p_reason, 'teacher_stopped'),
     updated_at = now()
-  where id = 'main';
+  where id = p_room_id;
 
   return v_round_id;
 end;
@@ -341,7 +347,15 @@ declare
   v_new_wrong_log jsonb;
   v_msg text;
 begin
-  select * into v_room from public.rooms where id = 'main';
+  select * into v_p from public.participants where id = p_participant_id for update;
+  if not found then
+    return jsonb_build_object(
+      'correct', false,
+      'error', 'Участник не найден в текущей сессии.'
+    );
+  end if;
+
+  select * into v_room from public.rooms where id = v_p.room_id;
   if not found or v_room.status <> 'running' then
     return jsonb_build_object(
       'correct', false,
@@ -351,18 +365,10 @@ begin
 
   -- Автозавершение, если таймер уже вышел
   if v_room.ends_at is not null and v_now >= v_room.ends_at then
-    perform public.finalize_competition_round('time_up');
+    perform public.finalize_competition_round('time_up', v_room.id);
     return jsonb_build_object(
       'correct', false,
       'error', 'Время этапа вышло — результаты уже подведены.'
-    );
-  end if;
-
-  select * into v_p from public.participants where id = p_participant_id for update;
-  if not found then
-    return jsonb_build_object(
-      'correct', false,
-      'error', 'Участник не найден в текущей сессии.'
     );
   end if;
 
@@ -395,7 +401,7 @@ begin
       select coalesce(max(finish_place), 0) + 1
         into v_finish_place
       from public.participants
-      where room_id = 'main';
+      where room_id = v_room.id;
     end if;
 
     update public.participants
@@ -414,18 +420,18 @@ begin
       from_level, to_level, finished, created_at
     )
     values (
-      'main', v_p.id, v_p.first_name || ' ' || v_p.last_name, v_p.track, v_p.group_name,
+      v_room.id, v_p.id, v_p.first_name || ' ' || v_p.last_name, v_p.track, v_p.group_name,
       v_p.level, v_new_level, v_finished, v_now
     );
 
     -- Проверяем, финишировали ли все участники
     select not exists (
       select 1 from public.participants
-      where room_id = 'main' and level < v_room.max_level
+      where room_id = v_room.id and level < v_room.max_level
     ) into v_all_done;
 
     if v_all_done then
-      perform public.finalize_competition_round('all_finished');
+      perform public.finalize_competition_round('all_finished', v_room.id);
     end if;
 
     if v_finished then
@@ -478,9 +484,12 @@ $$;
 -- ============================================================================
 -- RPC: Тестовый подъём (+1 этаж) для преподавателя
 -- ============================================================================
+drop function if exists public.advance_demo_participant(uuid, text);
+
 create or replace function public.advance_demo_participant(
   p_participant_id uuid default null,
-  p_group text default null
+  p_group text default null,
+  p_room_id text default 'main'
 )
 returns void
 language plpgsql
@@ -496,21 +505,21 @@ declare
   v_task_id text;
   v_all_done boolean := false;
 begin
-  select * into v_room from public.rooms where id = 'main';
+  select * into v_room from public.rooms where id = p_room_id;
   if not found then return; end if;
 
   if v_room.status = 'lobby' then
     update public.rooms
     set status = 'running', started_at = v_now, finished_at = null, finish_reason = null, updated_at = now()
-    where id = 'main';
+    where id = p_room_id;
   end if;
 
   if p_participant_id is not null then
-    select * into v_p from public.participants where id = p_participant_id and level < v_room.max_level for update;
+    select * into v_p from public.participants where id = p_participant_id and room_id = p_room_id and level < v_room.max_level for update;
   else
     select * into v_p
     from public.participants
-    where room_id = 'main'
+    where room_id = p_room_id
       and level < v_room.max_level
       and (p_group is null or group_name = p_group)
     order by random()
@@ -529,7 +538,7 @@ begin
     select coalesce(max(finish_place), 0) + 1
       into v_finish_place
     from public.participants
-    where room_id = 'main';
+    where room_id = p_room_id;
   end if;
 
   update public.participants
@@ -548,17 +557,17 @@ begin
     from_level, to_level, finished, created_at
   )
   values (
-    'main', v_p.id, v_p.first_name || ' ' || v_p.last_name, v_p.track, v_p.group_name,
+    p_room_id, v_p.id, v_p.first_name || ' ' || v_p.last_name, v_p.track, v_p.group_name,
     v_p.level, v_new_level, v_finished, v_now
   );
 
   select not exists (
     select 1 from public.participants
-    where room_id = 'main' and level < v_room.max_level
+    where room_id = p_room_id and level < v_room.max_level
   ) into v_all_done;
 
   if v_all_done then
-    perform public.finalize_competition_round('all_finished');
+    perform public.finalize_competition_round('all_finished', p_room_id);
   end if;
 end;
 $$;
@@ -588,8 +597,8 @@ drop policy if exists "public_all_round_results" on public.competition_round_res
 create policy "public_all_round_results" on public.competition_round_results for all using (true) with check (true);
 
 grant execute on function public.submit_task_answer(uuid, text, text) to anon, authenticated;
-grant execute on function public.finalize_competition_round(text) to anon, authenticated;
-grant execute on function public.advance_demo_participant(uuid, text) to anon, authenticated;
+grant execute on function public.finalize_competition_round(text, text) to anon, authenticated;
+grant execute on function public.advance_demo_participant(uuid, text, text) to anon, authenticated;
 
 -- ============================================================================
 -- Включение Realtime-подписок для мгновенной синхронизации всех экранов
